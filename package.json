@@ -1,0 +1,20 @@
+{
+  "name": "lovable-on-cloudflare",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create platform-db",
+    "db:migrate": "wrangler d1 execute platform-db --remote --file=./schema/platform.sql",
+    "db:migrate:local": "wrangler d1 execute platform-db --local --file=./schema/platform.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.3.3",
+    "wrangler": "^3.114.17"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  }
+}
