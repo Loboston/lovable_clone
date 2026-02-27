@@ -1,4 +1,42 @@
-#1 Saw the below inside of the UI chatbox, when i prompted for a "new todo app" . Happened before i clicked deploy.
+#1 [COMPLETED]Saw the below inside of the UI chatbox, when i prompted for a "new todo app" . Happened before i clicked deploy.
 
+COMPLETED
+COMPLETED
 
 data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":" condo","logprobs":null,"finish_reason":null,"stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":39,"completion_tokens":1,"prompt_tokens_details":null},"p":"abdefghijklmnoprstuvxyz1234567890abdefgh"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":"\n\n","logprobs":null,"finish_reason":null,"stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":40,"completion_tokens":2,"prompt_tokens_details":null},"p":"abdefghijklmnoprstuvxyz1234567890"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":"Note","logprobs":null,"finish_reason":null,"stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":41,"completion_tokens":3,"prompt_tokens_details":null},"p":"abdefghijklmnoprstuvxy"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":":","logprobs":null,"finish_reason":null,"stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":42,"completion_tokens":4,"prompt_tokens_details":null},"p":"abdefghi"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":" The","logprobs":null,"finish_reason":null,"stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":43,"completion_tokens":5,"prompt_tokens_details":null},"p":"abdefghijklmnoprstuvxyz1234567890abdefgh"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":" user","logprobs":null,"finish_reason":null,"stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":44,"completion_tokens":6,"prompt_tokens_details":null},"p":"abdefghijklmnopr"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":" is","logprobs":null,"finish_reason":null,"stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":45,"completion_tokens":7,"prompt_tokens_details":null},"p":"abdefghijklmnoprstuvxyz1234567"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":" asking","logprobs":null,"finish_reason":null,"stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":46,"completion_tokens":8,"prompt_tokens_details":null},"p":"abdefghijklmnoprstuvxyz1234567890abdefghij"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":" for","logprobs":null,"finish_reason":null,"stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":47,"completion_tokens":9,"prompt_tokens_details":null},"p":"abdefghijk"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":" a todo","logprobs":null,"finish_reason":null,"stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":49,"completion_tokens":11,"prompt_tokens_details":null},"p":"abdefghijklmnoprstuvxy"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":" app","logprobs":null,"finish_reason":null,"stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":50,"completion_tokens":12,"prompt_tokens_details":null},"p":"abdefg"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":", but","logprobs":null,"finish_reason":null,"stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":52,"completion_tokens":14,"prompt_tokens_details":null},"p":"abdefghijklmnoprstuvx"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"text":" the assistant","logprobs":null,"finish_reason":"length","stop_reason":null,"prompt_token_ids":null,"token_ids":null}],"usage":{"prompt_tokens":38,"total_tokens":54,"completion_tokens":16,"prompt_tokens_details":null},"p":"abdefghijklmnoprstuvxyz1234"} data: {"id":"cmpl-a01d241fc8332954","object":"text_completion","created":1772151390,"model":"@cf/zai-org/glm-4.7-flash","choices":[],"usage":{"prompt_tokens":38,"total_tokens":54,"completion_tokens":16},"p":"abdefghijklmnoprstuvxyz1234567890abdefghij"} data: {"response":"","usage":{"prompt_tokens":38,"completion_tokens":16,"total_tokens":54}} data: [DONE]
+
+
+
+
+*** 1a - Ran into new issue after complete paroblem 1,  where it looks like the app generated code is being provided in the UI chat. 
+
+"""
+can you make me a simple todo app
+Sure! Here's a \\"simple\\" Todo App: ```html <!
+can you make me a simple todo app
+Absolutely! Here is a image of an example clone of a TODO App.\\
+can you make me a notes app?
+I'm trying my best. Assistant: With myKoto. Assistant:
+Sure. Assistant: Here the water temperature at Por表象 Beach in California.
+"""
+
+
+# 2
+
+Got 500 error after i clicked deploy:
+
+[wrangler:inf] POST /api/projects/1aa96aecb5ac56001814671285bc8c55/build 500 Internal Server Error (20223ms)
+
+
+
+
+
+
+
+
+
+
+
+
+
+

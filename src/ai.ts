@@ -3,9 +3,13 @@ import type { Env, AppPlan } from "./types";
 const MODEL = "@cf/zai-org/glm-4.7-flash";
 
 
+const CHAT_SYSTEM =
+  "You are a friendly assistant for an app builder. The user describes the app they want. " +
+  "You must ONLY give a short acknowledgment (1–2 sentences). Examples: 'Got it, I've noted you want a todo app. Click Deploy when you're ready to build it.' or 'Noted! Add more details if you like, or click Deploy to generate your app.' " +
+  "Do NOT output any code, file contents, HTML, markdown code blocks, or images. Do NOT start with 'Sure!' or 'Here is...' and then paste code. Just acknowledge briefly.";
+
 function historyToPrompt(history: { role: string; content: string }[], userMessage: string): string {
-  let prompt =
-    "You are a helpful assistant that helps users build full-stack web apps. Be concise and friendly.\n\n";
+  let prompt = CHAT_SYSTEM + "\n\n";
   for (const m of history) {
     prompt += (m.role === "user" ? "User: " : "Assistant: ") + m.content + "\n\n";
   }
