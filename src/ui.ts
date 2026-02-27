@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
 
-const html = `<!DOCTYPE html>
+/** Builder UI HTML – exported so the main app can serve it at "/" */
+export const builderHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -205,7 +206,7 @@ const html = `<!DOCTYPE html>
 const app = new Hono<{ Bindings: Env }>();
 
 app.get("/", (c) => {
-  return c.html(html);
+  return c.html(builderHtml);
 });
 
 export default app;

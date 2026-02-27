@@ -4,11 +4,14 @@ import type { Env } from "./types";
 import authRoutes from "./routes/auth";
 import chatRoutes from "./routes/chat";
 import projectRoutes from "./routes/projects";
-import builderUi from "./ui";
+import { builderHtml } from "./ui";
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.use("*", cors({ origin: "*", credentials: true }));
+
+// Serve builder UI at root first so GET / always returns the page
+app.get("/", (c) => c.html(builderHtml));
 
 app.route("/api/auth", authRoutes);
 app.route("/api/chat", chatRoutes);
@@ -72,7 +75,5 @@ app.get("/apps/:projectId", async (c) => {
     headers: res.headers,
   });
 });
-
-app.route("/", builderUi);
 
 export default app;

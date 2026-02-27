@@ -35,6 +35,8 @@ app.post("/register", async (c) => {
   }
 
   const secret = c.env.PLATFORM_JWT_SECRET;
+  // Temporary: confirm JWT secret is available in dev
+  console.log("[auth/register] PLATFORM_JWT_SECRET present:", !!secret, "type:", typeof secret);
   if (!secret) return c.json({ error: "Server misconfiguration" }, 500);
   const token = await createJWT({ sub: id, email }, secret);
   return c.json({ token, user: { id, email } });
@@ -66,6 +68,8 @@ app.post("/login", async (c) => {
   }
 
   const secret = c.env.PLATFORM_JWT_SECRET;
+  // Temporary: confirm JWT secret is available in dev
+  console.log("[auth/login] PLATFORM_JWT_SECRET present:", !!secret, "type:", typeof secret);
   if (!secret) return c.json({ error: "Server misconfiguration" }, 500);
   const token = await createJWT({ sub: user.id, email: user.email }, secret);
   return c.json({ token, user: { id: user.id, email: user.email } });

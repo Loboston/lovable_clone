@@ -38,7 +38,16 @@ The full MVP from your doc is implemented in one pass. Here’s what’s there a
 ### What you need to do
 
 1. **Create Cloudflare resources**  
-   - D1 database (`wrangler d1 create platform-db`), R2 bucket `user-code`, KV namespace, and a **dispatch namespace** named `user-apps` (e.g. in the dashboard).
+   - D1 database (`wrangler d1 create platform-db`), R2 bucket `user-code`, KV namespace, and a 
+
+
+   
+    ***********
+   ** STILL NEEDS TO BE CREATED!!!!!!!!!!!!!!1
+   **dispatch namespace** named `user-apps` (e.g. in the dashboard).
+    ****************
+
+
 
 2. **Update `wrangler.toml`**  
    - Set `database_id` for the D1 database and `id` for the KV namespace (no placeholder values).
