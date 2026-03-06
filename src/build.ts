@@ -4,6 +4,7 @@ import {
   createD1Database,
   runD1Query,
   deployUserWorker,
+  isEmptyOrNoQuery,
 } from "./cf-api";
 import { randomId } from "./auth";
 
@@ -43,13 +44,15 @@ export async function buildProject(
   const statements = migrationSql
     .split(";")
     .map((s) => s.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((s) => !isEmptyOrNoQuery(s));
   for (const sql of statements) {
     await runD1Query(accountId, apiToken, d1DatabaseId, sql + ";");
   }
-  if (statements.length === 0 && migrationSql.trim()) {
-    const sql = migrationSql.trim();
-    await runD1Query(accountId, apiToken, d1DatabaseId, sql.endsWith(";") ? sql : sql + ";");
+  const migrationTrimmed = migrationSql.trim();
+  if (statements.length === 0 && migrationTrimmed && !isEmptyOrNoQuery(migrationTrimmed)) {
+    const sql = migrationTrimmed.endsWith(";") ? migrationTrimmed : migrationTrimmed + ";";
+    await runD1Query(accountId, apiToken, d1DatabaseId, sql);
   }
 
   const workerName = `app-${projectId}`;

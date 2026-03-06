@@ -63,6 +63,18 @@ const PLAN_SYSTEM = `You are an app architect. Given a user's app description an
 }
 Use SQLite/D1 types (TEXT, INTEGER, etc.). Always include an app_users (or similar) table if needsAuth is true.`;
 
+/** Normalize AI binding response to a string; supports OpenAI-style and simple shapes. */
+function getTextFromAiResponse(out: unknown): string {
+  if (typeof out === "string") return out;
+  const o = out as Record<string, unknown>;
+  const content = (o?.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content;
+  if (typeof content === "string") return content;
+  if (typeof o?.response === "string") return o.response;
+  const result = o?.result as Record<string, unknown> | undefined;
+  if (result && typeof result.response === "string") return result.response;
+  return "";
+}
+
 export async function generatePlan(
   env: Env,
   conversation: { role: string; content: string }[]
@@ -85,14 +97,22 @@ export async function generatePlan(
     stream: false,
   } as never);
 
-  const text = typeof out === "string" ? out : (out as { response?: string })?.response ?? "";
+  const text = getTextFromAiResponse(out);
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   const jsonStr = jsonMatch ? jsonMatch[0] : text;
   let plan: AppPlan;
   try {
     plan = JSON.parse(jsonStr) as AppPlan;
   } catch {
-    throw new Error("AI did not return valid plan JSON: " + text.slice(0, 500));
+    const rawStr =
+      typeof out === "string" ? out : JSON.stringify(out, null, 2);
+    const rawPreview = rawStr.slice(0, 800);
+    throw new Error(
+      "AI did not return valid plan JSON. Extracted text: " +
+        text.slice(0, 500) +
+        " | Raw AI response: " +
+        rawPreview
+    );
   }
   if (!plan.appName || !plan.pages || !plan.dataModel?.tables) {
     throw new Error("Plan missing required fields: " + JSON.stringify(plan));
@@ -128,7 +148,7 @@ export async function generateCode(
     stream: false,
   } as never);
 
-  const text = typeof out === "string" ? out : (out as { response?: string })?.response ?? "";
+  const text = getTextFromAiResponse(out);
   const fileRegex = /---FILE:(\S+)---\s*([\s\S]*?)(?=---FILE:\S+---|$)/g;
   const files: Record<string, string> = {};
   let m: RegExpExecArray | null;

@@ -28,6 +28,17 @@ Got 500 error after i clicked deploy:
 [wrangler:inf] POST /api/projects/1aa96aecb5ac56001814671285bc8c55/build 500 Internal Server Error (20223ms)
 
 
+2.a
+
+Failed to create D1 database: [{"code":7502,"message":"Database with name: 'app-3616d5050bf06c174ddaba5b4c399cf2' already exists"}]
+
+getting this error, maybe solved by creating a new app and pbypassed but need to revisit
+
+
+3. 
+getting stuck at namespace portion now.
+
+Failed to create assets upload session: {"result":null,"success":false,"errors":[{"code":10121,"message":"You do not have access to dispatch namespaces. You can purchase it within the Cloudflare dashboard here: https://dash.cloudflare.com?to=/:account/workers-for-platforms - if you are an Enterprise customer please contact your account team."}],"messages":[]}
 
 
 

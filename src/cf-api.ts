@@ -47,12 +47,29 @@ export async function createD1Database(
   return { uuid, name: r?.name ?? name };
 }
 
+/** True if sql is empty, only whitespace, semicolons, or only comments — i.e. not a real query. */
+export function isEmptyOrNoQuery(sql: string): boolean {
+  const t = sql.trim();
+  if (t === "") return true;
+  if (t.replace(/;/g, "").trim() === "") return true;
+  // Strip single-line (--) and block (/* */) comments so comment-only SQL is treated as no query
+  const withoutComments = t
+    .replace(/--[^\n]*/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .trim();
+  if (withoutComments === "" || withoutComments.replace(/;/g, "").trim() === "") return true;
+  return false;
+}
+
 export async function runD1Query(
   accountId: string,
   apiToken: string,
   databaseId: string,
   sql: string
 ): Promise<unknown> {
+  if (isEmptyOrNoQuery(sql)) {
+    return undefined;
+  }
   const res = await cfFetch(
     accountId,
     apiToken,
@@ -170,7 +187,7 @@ export async function deployUserWorker(params: DeployUserWorkerParams): Promise<
     compatibility_date: "2024-01-01",
     assets: { jwt: completionToken },
     bindings: [
-      { type: "d1_database", name: "DB", database_id: d1DatabaseId },
+      { type: "d1", name: "DB", id: d1DatabaseId },
       { type: "r2_bucket", name: "STORAGE", bucket_name: r2BucketName },
       { type: "secret_text", name: "JWT_SECRET", text: jwtSecret },
       { type: "assets", name: "ASSETS" },
