@@ -195,6 +195,16 @@ export async function generateCode(
     .replace(/\bh\.preact\.useState\b/g, "useState")
     .replace(/\bh\.preact\.useEffect\b/g, "useEffect");
 
+  // Strip lines that redeclare shell-provided globals (avoids "redeclaration of const html" etc.).
+  const shellProvidedDeclarations = [
+    /^\s*(?:const|let|var)\s+html\s*=\s*htm\.bind\s*\(\s*h\s*\)\s*;?\s*(?:\/\/.*)?$/,
+    /^\s*(?:const|let|var)\s+API_URL\s*=\s*['"]\/api\/['"]\s*;?\s*(?:\/\/.*)?$/,
+  ];
+  appBody = appBody
+    .split(/\r?\n/)
+    .filter((line) => !shellProvidedDeclarations.some((re) => re.test(line.trim())))
+    .join("\n");
+
   const indexHtml = INDEX_HTML_TEMPLATE.replace("{{APP_BODY}}", appBody);
 
   return {
