@@ -120,9 +120,35 @@ export async function generatePlan(
   return plan;
 }
 
+/** Platform-controlled frontend shell. AI only fills {{APP_BODY}}; we guarantee correct Preact/hooks setup. */
+const INDEX_HTML_TEMPLATE = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-100 min-h-screen">
+    <div id="root"></div>
+    <script type="module">
+  import { h, render } from 'https://esm.sh/preact@10';
+  import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';
+  import htm from 'https://esm.sh/htm@3';
+  const html = htm.bind(h);
+  const API_URL = '/api/';
+
+  {{APP_BODY}}
+
+  const root = document.getElementById('root');
+  render(html\`<\${App} />\`, root);
+    </script>
+  </body>
+</html>`;
+
 const CODE_SYSTEM = `You generate a full-stack app for Cloudflare:
 1. worker.js - ES module. export default { async fetch(request, env) { ... } }. Route /api/* to API logic, else return env.ASSETS.fetch(request). Use env.DB (D1), env.JWT_SECRET, env.STORAGE (R2) if needed. Implement auth (register/login) and CRUD from the plan. No imports from npm; use inline password hash (crypto.subtle.digest SHA-256 with salt) and JWT (HMAC-SHA256).
-2. index.html - Single file. Use Preact via ESM: import { h, render } from 'https://esm.sh/preact@10'; import htm from 'https://esm.sh/htm@3'; const html = htm.bind(h); Tailwind via CDN. Call /api/* on same origin.
+2. index.html - Output ONLY the JavaScript that goes INSIDE the app (the "app body"). The platform provides the HTML shell, script tag, and these in scope: h, render, useState, useEffect, htm, html = htm.bind(h), API_URL = '/api/'. You MUST use useState and useEffect directly (e.g. const [x, setX] = useState(0)). Do NOT use h.preact.useState or h.preact.useEffect. Do NOT add any import lines or script/html tags. Define your components (e.g. LoginForm, App) and the root App component. Do not include the render() call or getElementById('root') - the platform adds that.
 3. migration.sql - SQLite/D1: CREATE TABLE IF NOT EXISTS for each table; add indexes.
 
 Output exactly three blocks, each starting with a line ---FILE:filename--- and ending before the next ---FILE:--- or end of message. No other text.`;
@@ -163,9 +189,17 @@ export async function generateCode(
   if (!files.workerJs || !files.indexHtml || !files.migrationSql) {
     throw new Error("AI did not return all three files. Got: " + Object.keys(files).join(", "));
   }
+
+  // Normalize app body: fix AI mistakes so useState/useEffect work (they're in scope from template).
+  let appBody = files.indexHtml
+    .replace(/\bh\.preact\.useState\b/g, "useState")
+    .replace(/\bh\.preact\.useEffect\b/g, "useEffect");
+
+  const indexHtml = INDEX_HTML_TEMPLATE.replace("{{APP_BODY}}", appBody);
+
   return {
     workerJs: files.workerJs,
-    indexHtml: files.indexHtml,
+    indexHtml,
     migrationSql: files.migrationSql,
   };
 }
