@@ -187,6 +187,25 @@ function validateAppBody(code: string): string[] {
   return errors;
 }
 
+/** Catch common worker.js mistakes: plain-text API errors and missing body parse handling. */
+function validateWorkerJs(code: string): string[] {
+  const errors: string[] = [];
+
+  // Plain-text "Not Found" (or similar) causes frontend res.json() to throw; API must return JSON.
+  if (/new\s+Response\s*\(\s*["'][^"']+["']\s*,\s*\{\s*status\s*:\s*(400|401|403|404|500)/i.test(code)) {
+    errors.push("worker.js: API error responses should use Response.json(...), not plain-text new Response(...)");
+  }
+
+  // request.json() without try/catch can throw on invalid JSON and surface as non-JSON response.
+  if (/await\s+request\.json\s*\(\s*\)/.test(code) && (!/\btry\s*\{/.test(code) || !/\bcatch\s*\(/.test(code))) {
+    errors.push(
+      "worker.js: Wrap request.json() in try/catch and return Response.json({ error: 'Invalid JSON' }, { status: 400 }) on failure"
+    );
+  }
+
+  return errors;
+}
+
 /** Platform-controlled frontend shell. AI generates app.js, which is injected into {{APP_BODY}}. */
 const INDEX_HTML_TEMPLATE = `<!DOCTYPE html>
 <html lang="en">
@@ -221,6 +240,8 @@ const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app:
 - Route /api/* to API logic, otherwise return env.ASSETS.fetch(request).
 - Use env.DB (D1), env.JWT_SECRET, env.STORAGE (R2) if needed.
 - Implement auth and CRUD from the plan.
+- API responses: For every /api/* response (including 404 and 500), return JSON only. Use Response.json({ error: '...' }, { status: 404 }) or 400/500 for errors. Never return plain text (e.g. new Response('Not Found')) for API routes.
+- Body parsing: When reading the request body with request.json(), use try/catch; on failure return Response.json({ error: 'Invalid JSON' }, { status: 400 }).
 - No npm imports; use inline password hash (crypto.subtle.digest SHA-256 with salt) and JWT (HMAC-SHA256).
 
 2. app.js
@@ -233,6 +254,9 @@ const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app:
 - Use htm tagged template syntax (html\`...\`), not JSX.
 - Use camelCase handlers only: onClick, onInput, onChange, onSubmit, onKeyDown.
 - Do not include comments explaining the code.
+- For fetch calls, always check res.ok before using response data.
+- For non-2xx responses, read the JSON error body and surface a user-friendly error message.
+- Do not assume every response is a successful payload.
 
 3. migration.sql
 - Full SQLite/D1 migration. CREATE TABLE IF NOT EXISTS for each table; add indexes where useful.
@@ -286,6 +310,11 @@ export async function generateCode(
 
   if (!files.workerJs || !files.appJs || !files.migrationSql) {
     throw new Error("AI did not return all three files. Got: " + Object.keys(files).join(", "));
+  }
+
+  const workerValidationErrors = validateWorkerJs(files.workerJs);
+  if (workerValidationErrors.length > 0) {
+    throw new Error("worker.js validation failed: " + workerValidationErrors.join("; "));
   }
 
   // Normalize app body: fix common AI mistakes so hooks/globals use the template-provided scope.
