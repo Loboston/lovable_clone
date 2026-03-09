@@ -215,6 +215,13 @@ export async function generateCode(
     "import { h, render } from 'https://esm.sh/preact@10';",
     "import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';",
     "import htm from 'https://esm.sh/htm@3';",
+    // Stray render (template does render(html`<${App} />`, root) after APP_BODY)
+    "render(App);",
+    "render(App)",
+    "render(html`<${App} />`, root);",
+    "render(html`<${App} />`, root)",
+    "render(html`<${App} />`, document.getElementById('root'));",
+    "render(html`<${App} />`, document.getElementById('root'))",
   ]);
   appBody = appBody
     .replace(/\r\n/g, "\n")
