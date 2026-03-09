@@ -223,6 +223,7 @@ function validateWorkerJs(code: string): string[] {
  */
 function normalizeAppBody(code: string): string {
   let out = code
+    .replace(/\r\n/g, "\n")
     .replace(/\bh\.preact\.useState\b/g, "useState")
     .replace(/\bh\.preact\.useEffect\b/g, "useEffect");
 
@@ -232,21 +233,27 @@ function normalizeAppBody(code: string): string {
     .replace(/^\s*import\s+.*from\s+['"]https:\/\/esm\.sh\/preact@10(?:\/hooks)?['"]\s*;?\s*$/gm, "")
     .replace(/^\s*import\s+.*from\s+['"]https:\/\/esm\.sh\/htm@3['"]\s*;?\s*$/gm, "");
 
-  // Remove common redeclarations of template-provided globals.
+  // Remove common redeclarations of template-provided globals (flexible whitespace/semicolon).
   out = out
-    .replace(/^\s*const\s+html\s*=\s*htm\.bind\(h\)\s*;?\s*$/gm, "")
+    .replace(/^\s*const\s+html\s*=\s*htm\.bind\s*\(\s*h\s*\)\s*;?\s*$/gm, "")
     .replace(/^\s*const\s+API_URL\s*=\s*['"][^'"]*['"]\s*;?\s*$/gm, "")
+    .replace(/^\s*const\s+root\s*=\s*document\.getElementById\s*\(\s*['"]root['"]\s*\)\s*;?\s*$/gm, "")
     .replace(/^\s*const\s*\{\s*useState\s*,\s*useEffect\s*\}\s*=\s*globalThis\s*;?\s*$/gm, "")
     .replace(/^\s*const\s*\{[^}]*\bh\b[^}]*\brender\b[^}]*\bhtml\b[^}]*\buseState\b[^}]*\buseEffect\b[^}]*\}\s*=\s*preact\s*;?\s*$/gm, "")
     .replace(/^\s*const\s*\{[^}]*\buseState\b[^}]*\buseEffect\b[^}]*\}\s*=\s*preact\s*;?\s*$/gm, "");
 
-  // Remove duplicate mount calls.
+  // Remove duplicate mount calls (any render(html`<${App} />`, root) style).
   out = out
     .replace(/^\s*render\s*\(\s*App\s*\)\s*;?\s*$/gm, "")
-    .replace(/^\s*render\s*\(\s*html`<\$\{App\}\s*\/?>`\s*,\s*root\s*\)\s*;?\s*$/gm, "")
-    .replace(/^\s*render\s*\(\s*html`<\$\{App\}\s*\/?>`\s*,\s*document\.getElementById\(['"]root['"]\)\s*\)\s*;?\s*$/gm, "");
+    .replace(/^\s*render\s*\(\s*html\s*`\s*<\s*\$\{\s*App\s*\}\s*\/?\s*>\s*`\s*,\s*root\s*\)\s*;?\s*$/gm, "")
+    .replace(/^\s*render\s*\(\s*html\s*`\s*<\s*\$\{\s*App\s*\}\s*\/?\s*>\s*`\s*,\s*document\.getElementById\s*\(\s*['"]root['"]\s*\)\s*\)\s*;?\s*$/gm, "");
 
-  // Keep the old exact-line stripping too, as a safety net.
+  // Patterns for lines that must never appear (template already provides these).
+  const STRIP_PATTERNS = [
+    /^\s*const\s+html\s*=\s*htm\.bind\s*\(\s*h\s*\)\s*;?\s*$/,
+    /^\s*const\s+root\s*=\s*document\.getElementById\s*\(\s*['"]root['"]\s*\)\s*;?\s*$/,
+    /^\s*render\s*\(\s*html\s*`\s*<\s*\$\{\s*App\s*\}\s*\/?\s*>\s*`\s*,\s*(?:root|document\.getElementById\s*\(\s*['"]root['"]\s*\))\s*\)\s*;?\s*$/,
+  ];
   const STRIP_LINES = new Set([
     "const html = htm.bind(h);",
     "const html = htm.bind(h)",
@@ -254,6 +261,10 @@ function normalizeAppBody(code: string): string {
     "const API_URL = \"/api/\";",
     "const API_URL = '/api/'",
     "const API_URL = \"/api/\"",
+    "const root = document.getElementById('root');",
+    "const root = document.getElementById(\"root\");",
+    "const root = document.getElementById('root')",
+    "const root = document.getElementById(\"root\")",
     "const { useState, useEffect } = globalThis;",
     "const { useState, useEffect } = globalThis",
     "const {useState, useEffect} = globalThis;",
@@ -270,9 +281,13 @@ function normalizeAppBody(code: string): string {
   ]);
 
   out = out
-    .replace(/\r\n/g, "\n")
     .split("\n")
-    .filter((line) => !STRIP_LINES.has(line.trim()))
+    .filter((line) => {
+      const t = line.trim();
+      if (STRIP_LINES.has(t)) return false;
+      if (STRIP_PATTERNS.some((p) => p.test(t))) return false;
+      return true;
+    })
     .join("\n");
 
   // Collapse repeated blank lines.
@@ -324,8 +339,8 @@ const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app:
 
 2. app.js
 - This is NOT a full HTML file. Output only JavaScript for insertion into an existing platform-owned HTML template.
-- The template already provides: script type="module", imports for h, render, useState, useEffect, htm, const html = htm.bind(h), const API_URL = platform-provided value, and the final render(html\`<\${App} />\`, root).
-- Do NOT output: <!DOCTYPE html>, <html>, <head>, <body>, <script>, import statements, const html = ..., const API_URL = ..., render(...), document.getElementById(...), export default, App.toString = ..., or JSX.
+- The template ALREADY provides (do not repeat): (1) imports for h, render, useState, useEffect, htm, (2) const html = htm.bind(h), (3) const API_URL, (4) const root = document.getElementById('root'), (5) the single call render(html\`<\${App} />\`, root). You must NEVER output any of these: no const html, no const API_URL, no const root, no render(...), no document.getElementById('root').
+- Do NOT output: <!DOCTYPE html>, <html>, <head>, <body>, <script>, import statements, const html = ..., const API_URL = ..., const root = ..., render(...), document.getElementById(...), export default, App.toString = ..., or JSX.
 - Do NOT import from 'preact', 'preact/hooks', or 'htm'.
 - Do NOT destructure h, render, html, useState, or useEffect from preact, globalThis, or any other global.
 - You MUST define const App = () => { ... } as the root component. Child components may be defined before App.
@@ -337,6 +352,7 @@ const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app:
 - For fetch calls, always check res.ok before using response data.
 - For non-2xx responses, read the JSON error body and surface a user-friendly error message.
 - Do not assume every response is a successful payload.
+- Use the provided API_URL for every backend request. Never hardcode '/api/' or '/api/...'.
 
 3. migration.sql
 - Full SQLite/D1 migration. CREATE TABLE IF NOT EXISTS for each table; add indexes where useful.
