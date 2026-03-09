@@ -146,10 +146,6 @@ function validateAppBody(code: string): string[] {
     [/```/, "markdown code fence"],
     [/\bApp\.toString\s*=/, "App.toString override"],
     [/\bexport\s+default\b/, "export default"],
-    [/\bReact\./, "React.* API"],
-    [/return\s*<\s*[A-Za-z]/, "JSX return syntax"],
-    [/=\s*<\s*[A-Za-z]/, "JSX assignment"],
-    [/\)\s*=>\s*<\s*[A-Za-z]/, "JSX arrow return"],
     [/^\s*const\s*\{[^}]*\buseState\b[^}]*\}\s*=\s*preact\s*;?\s*$/m, "preact global destructuring"],
     [/^\s*const\s*\{[^}]*\brender\b[^}]*\}\s*=\s*preact\s*;?\s*$/m, "preact render destructuring"],
   ];
@@ -163,29 +159,10 @@ function validateAppBody(code: string): string[] {
   const appMatch = code.match(/\bconst\s+App\s*=|\bfunction\s+App\s*\(/);
   if (!appMatch || appMatch.index === undefined) {
     errors.push("Missing App component (const App = ... or function App(...))");
-  } else {
-    const beforeApp = code.slice(0, appMatch.index);
-
-    if (/\buseState\s*\(/.test(beforeApp) || /\buseEffect\s*\(/.test(beforeApp)) {
-      errors.push("Hooks appear before App definition; possible top-level hook usage");
-    }
   }
+  // Hooks-before-App check removed: child components or custom hooks may be defined before App.
 
-  const lowercaseHandlers = [
-    "onclick",
-    "onchange",
-    "oninput",
-    "onkeypress",
-    "onkeydown",
-    "onsubmit",
-  ];
-
-  for (const handler of lowercaseHandlers) {
-    const re = new RegExp(`\\b${handler}\\s*=`);
-    if (re.test(code)) {
-      errors.push(`Use camelCase event handlers instead of ${handler}`);
-    }
-  }
+  // Event handlers are normalized to camelCase in normalizeAppBody, so we no longer fail on lowercase here.
 
   if (!/html\s*`/.test(code)) {
     errors.push("Expected htm template usage: html`...`");
@@ -228,6 +205,19 @@ function normalizeAppBody(code: string): string {
     .replace(/\r\n/g, "\n")
     .replace(/\bh\.preact\.useState\b/g, "useState")
     .replace(/\bh\.preact\.useEffect\b/g, "useEffect");
+
+  // Normalize lowercase event handlers to camelCase (Preact/htm expect onClick, etc.).
+  const handlerMap: [RegExp, string][] = [
+    [/\bonclick\s*=/g, "onClick="],
+    [/\bonchange\s*=/g, "onChange="],
+    [/\boninput\s*=/g, "onInput="],
+    [/\bonkeypress\s*=/g, "onKeyPress="],
+    [/\bonkeydown\s*=/g, "onKeyDown="],
+    [/\bonsubmit\s*=/g, "onSubmit="],
+  ];
+  for (const [re, replacement] of handlerMap) {
+    out = out.replace(re, replacement);
+  }
 
   // Remove common import variants.
   out = out
