@@ -31,7 +31,11 @@ export async function buildProject(
 
   const conversation = (history.results ?? []) as { role: string; content: string }[];
   const plan = await generatePlan(env, conversation);
-  const { workerJs, indexHtml, migrationSql } = await generateCode(env, plan, conversation);
+  const { workerJs, indexHtml: rawIndexHtml, migrationSql } = await generateCode(env, plan, conversation);
+
+  // Replace {{API_BASE}} so the app's fetch() calls hit the same-origin API under /apps/:projectId/
+  const apiBase = `/apps/${projectId}/api/`;
+  const indexHtml = rawIndexHtml.replace(/\{\{API_BASE\}\}/g, apiBase);
 
   const prefix = `projects/${projectId}/`;
   await env.CODE_BUCKET.put(`${prefix}worker.js`, workerJs);

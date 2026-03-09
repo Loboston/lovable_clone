@@ -124,64 +124,23 @@ export async function generatePlan(
 }
 
 /**
- * Returns validation errors for the generated app.js fragment.
- * Empty array = valid enough to inject into the platform template.
+ * Light validation for full generated index.html.
+ * Ensures it has the expected structure and the API_BASE placeholder for the platform.
  */
-function validateAppBody(code: string): string[] {
+function validateIndexHtml(html: string): string[] {
   const errors: string[] = [];
 
-  const bannedPatterns: [RegExp, string][] = [
-    [/<!DOCTYPE/i, "DOCTYPE"],
-    [/<html[\s>]/i, "<html>"],
-    [/<head[\s>]/i, "<head>"],
-    [/<body[\s>]/i, "<body>"],
-    [/<script[\s>]/i, "<script>"],
-    [/^\s*import\s+/m, "import statement"],
-    [/document\.getElementById\s*\(/, "document.getElementById(...)"],
-    [/\bconst\s+html\s*=/, "const html = ..."],
-    [/\bconst\s+API_URL\s*=/, "const API_URL = ..."],
-    [/```/, "markdown code fence"],
-    [/\bApp\.toString\s*=/, "App.toString override"],
-    [/\bexport\s+default\b/, "export default"],
-    [/\bReact\./, "React.* API"],
-    [/<[A-Za-z][^>]*>/, "raw JSX/HTML tag"],
-  ];
-
-  for (const [pattern, label] of bannedPatterns) {
-    if (pattern.test(code)) {
-      errors.push(`Banned in app.js: ${label}`);
-    }
+  if (!/<script/i.test(html)) {
+    errors.push("index.html: must contain a <script> tag");
   }
-
-  const appMatch = code.match(/\bconst\s+App\s*=|\bfunction\s+App\s*\(/);
-  if (!appMatch || appMatch.index === undefined) {
-    errors.push("Missing App component (const App = ... or function App(...))");
-  } else {
-    const beforeApp = code.slice(0, appMatch.index);
-
-    if (/\buseState\s*\(/.test(beforeApp) || /\buseEffect\s*\(/.test(beforeApp)) {
-      errors.push("Hooks appear before App definition; possible top-level hook usage");
-    }
+  if (!/render\s*\(/.test(html)) {
+    errors.push("index.html: must contain render(...) to mount the app");
   }
-
-  const lowercaseHandlers = [
-    "onclick",
-    "onchange",
-    "oninput",
-    "onkeypress",
-    "onkeydown",
-    "onsubmit",
-  ];
-
-  for (const handler of lowercaseHandlers) {
-    const re = new RegExp(`\\b${handler}\\s*=`);
-    if (re.test(code)) {
-      errors.push(`Use camelCase event handlers instead of ${handler}`);
-    }
+  if (!/\{\{API_BASE\}\}/.test(html)) {
+    errors.push("index.html: must contain {{API_BASE}} so the platform can set the API URL (e.g. const API_URL = \"{{API_BASE}}\";)");
   }
-
-  if (!/html\s*`/.test(code)) {
-    errors.push("Expected htm template usage: html`...`");
+  if (/```/.test(html)) {
+    errors.push("index.html: must not contain markdown code fences; output raw HTML only");
   }
 
   return errors;
@@ -206,8 +165,8 @@ function validateWorkerJs(code: string): string[] {
   return errors;
 }
 
-/** Platform-controlled frontend shell. AI generates app.js, which is injected into {{APP_BODY}}. */
-const INDEX_HTML_TEMPLATE = `<!DOCTYPE html>
+/** Canonical index.html scaffold (reference only — shown in prompt so the AI outputs a full file in this shape). */
+const INDEX_HTML_SCAFFOLD = `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -222,17 +181,16 @@ const INDEX_HTML_TEMPLATE = `<!DOCTYPE html>
   import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';
   import htm from 'https://esm.sh/htm@3';
   const html = htm.bind(h);
-  const API_URL = '/api/';
+  const API_URL = "{{API_BASE}}";
 
-  {{APP_BODY}}
-
+  const App = () => html\`<div>Your app here</div>\`;
   const root = document.getElementById('root');
   render(html\`<\${App} />\`, root);
     </script>
   </body>
 </html>`;
 
-const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app:
+const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app. Output full files; the platform will replace {{API_BASE}} in index.html before deploy.
 
 1. worker.js
 - Full ES module Worker file.
@@ -244,19 +202,15 @@ const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app:
 - Body parsing: When reading the request body with request.json(), use try/catch; on failure return Response.json({ error: 'Invalid JSON' }, { status: 400 }).
 - No npm imports; use inline password hash (crypto.subtle.digest SHA-256 with salt) and JWT (HMAC-SHA256).
 
-2. app.js
-- This is NOT a full HTML file. Output only JavaScript for insertion into an existing platform-owned HTML template.
-- The template already provides: script type="module", imports for h, render, useState, useEffect, htm, const html = htm.bind(h), const API_URL = '/api/', and the final render(html\`<\${App} />\`, root).
-- Do NOT output: <!DOCTYPE html>, <html>, <head>, <body>, <script>, import statements, const html = ..., const API_URL = ..., render(...), document.getElementById(...), export default, App.toString = ..., or JSX.
-- You MUST define const App = () => { ... } as the root component. Child components may be defined before App.
-- Hooks (useState, useEffect) may ONLY be called inside component functions, never at the top level of app.js.
-- Never place useState(...) or useEffect(...) above the App component definition.
-- Use htm tagged template syntax (html\`...\`), not JSX.
-- Use camelCase handlers only: onClick, onInput, onChange, onSubmit, onKeyDown.
-- Do not include comments explaining the code.
-- For fetch calls, always check res.ok before using response data.
-- For non-2xx responses, read the JSON error body and surface a user-friendly error message.
-- Do not assume every response is a successful payload.
+2. index.html
+- A complete, standalone HTML file. Use this structure as your scaffold (rewrite the whole file with your app logic):
+${INDEX_HTML_SCAFFOLD}
+- You MUST keep exactly: const API_URL = "{{API_BASE}}"; so the platform can inject the correct API base for preview/deploy. Do not replace {{API_BASE}} yourself.
+- Use htm + Preact (import from esm.sh as in scaffold). Use html\`...\` tagged templates, not JSX.
+- Define your root component (e.g. const App = () => ...) and mount with render(html\`<\${App} />\`, root).
+- Use camelCase event handlers: onClick, onInput, onChange, onSubmit, onKeyDown.
+- For fetch calls, check res.ok and handle non-2xx by reading JSON error body; show a user-friendly message.
+- Do not include markdown code fences in the output; output raw HTML only.
 
 3. migration.sql
 - Full SQLite/D1 migration. CREATE TABLE IF NOT EXISTS for each table; add indexes where useful.
@@ -264,7 +218,7 @@ const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app:
 Output exactly three blocks:
 ---FILE:worker.js---
 ...
----FILE:app.js---
+---FILE:index.html---
 ...
 ---FILE:migration.sql---
 ...
@@ -304,11 +258,11 @@ export async function generateCode(
     const content = m[2].trim();
 
     if (name === "worker.js") files.workerJs = content;
-    else if (name === "app.js") files.appJs = content;
+    else if (name === "index.html") files.indexHtml = content;
     else if (name === "migration.sql") files.migrationSql = content;
   }
 
-  if (!files.workerJs || !files.appJs || !files.migrationSql) {
+  if (!files.workerJs || !files.indexHtml || !files.migrationSql) {
     throw new Error("AI did not return all three files. Got: " + Object.keys(files).join(", "));
   }
 
@@ -317,50 +271,14 @@ export async function generateCode(
     throw new Error("worker.js validation failed: " + workerValidationErrors.join("; "));
   }
 
-  // Normalize app body: fix common AI mistakes so hooks/globals use the template-provided scope.
-  let appBody = files.appJs
-    .replace(/\bh\.preact\.useState\b/g, "useState")
-    .replace(/\bh\.preact\.useEffect\b/g, "useEffect");
-
-  // Strip exact lines that redeclare shell-provided globals or duplicate mount logic.
-  const STRIP_LINES = new Set([
-    "const html = htm.bind(h);",
-    "const html = htm.bind(h)",
-    "const API_URL = '/api/';",
-    "const API_URL = \"/api/\";",
-    "const API_URL = '/api/'",
-    "const API_URL = \"/api/\"",
-    "const { useState, useEffect } = globalThis;",
-    "const { useState, useEffect } = globalThis",
-    "const {useState, useEffect} = globalThis;",
-    "const {useState, useEffect} = globalThis",
-    "import { h, render } from 'https://esm.sh/preact@10';",
-    "import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';",
-    "import htm from 'https://esm.sh/htm@3';",
-    "render(App);",
-    "render(App)",
-    "render(html`<${App} />`, root);",
-    "render(html`<${App} />`, root)",
-    "render(html`<${App} />`, document.getElementById('root'));",
-    "render(html`<${App} />`, document.getElementById('root'))",
-  ]);
-
-  appBody = appBody
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .filter((line) => !STRIP_LINES.has(line.trim()))
-    .join("\n");
-
-  const validationErrors = validateAppBody(appBody);
-  if (validationErrors.length > 0) {
-    throw new Error("app.js validation failed: " + validationErrors.join("; "));
+  const indexValidationErrors = validateIndexHtml(files.indexHtml);
+  if (indexValidationErrors.length > 0) {
+    throw new Error("index.html validation failed: " + indexValidationErrors.join("; "));
   }
-
-  const indexHtml = INDEX_HTML_TEMPLATE.replace("{{APP_BODY}}", appBody);
 
   return {
     workerJs: files.workerJs,
-    indexHtml,
+    indexHtml: files.indexHtml,
     migrationSql: files.migrationSql,
   };
 }
