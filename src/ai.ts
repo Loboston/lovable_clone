@@ -195,14 +195,31 @@ export async function generateCode(
     .replace(/\bh\.preact\.useState\b/g, "useState")
     .replace(/\bh\.preact\.useEffect\b/g, "useEffect");
 
-  // Strip lines that redeclare shell-provided globals (avoids "redeclaration of const html" etc.).
-  const shellProvidedDeclarations = [
-    /^\s*(?:const|let|var)\s+html\s*=\s*htm\.bind\s*\(\s*h\s*\)\s*;?\s*(?:\/\/.*)?$/,
-    /^\s*(?:const|let|var)\s+API_URL\s*=\s*['"]\/api\/['"]\s*;?\s*(?:\/\/.*)?$/,
-  ];
+  // Strip lines that redeclare shell-provided globals (exact match only).
+  // Template already provides: import h, render, useState, useEffect, htm; const html, API_URL.
+  const STRIP_LINES = new Set([
+    // html
+    "const html = htm.bind(h);",
+    "const html = htm.bind(h)",
+    // API_URL
+    "const API_URL = '/api/';",
+    "const API_URL = \"/api/\";",
+    "const API_URL = '/api/'",
+    "const API_URL = \"/api/\"",
+    // useState/useEffect (e.g. const { useState, useEffect } = globalThis)
+    "const { useState, useEffect } = globalThis;",
+    "const { useState, useEffect } = globalThis",
+    "const {useState, useEffect} = globalThis;",
+    "const {useState, useEffect} = globalThis",
+    // Duplicate imports (exact template lines)
+    "import { h, render } from 'https://esm.sh/preact@10';",
+    "import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';",
+    "import htm from 'https://esm.sh/htm@3';",
+  ]);
   appBody = appBody
-    .split(/\r?\n/)
-    .filter((line) => !shellProvidedDeclarations.some((re) => re.test(line.trim())))
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => !STRIP_LINES.has(line.trim()))
     .join("\n");
 
   const indexHtml = INDEX_HTML_TEMPLATE.replace("{{APP_BODY}}", appBody);
