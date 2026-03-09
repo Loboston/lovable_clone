@@ -120,6 +120,32 @@ export async function generatePlan(
   return plan;
 }
 
+/** Returns validation errors for the app body. Empty array = valid. */
+function validateAppBody(code: string): string[] {
+  const errors: string[] = [];
+  const bannedPatterns: [RegExp, string][] = [
+    [/<!DOCTYPE/i, "DOCTYPE"],
+    [/<html[\s>]/i, "<html>"],
+    [/<head[\s>]/i, "<head>"],
+    [/<body[\s>]/i, "<body>"],
+    [/<script[\s>]/i, "<script>"],
+    [/^\s*import\s+/m, "import statement"],
+    [/document\.getElementById\s*\(/, "document.getElementById"],
+    [/\bconst\s+html\s*=/, "const html ="],
+    [/\bconst\s+API_URL\s*=/, "const API_URL ="],
+    [/```/, "markdown code fence"],
+  ];
+  for (const [pattern, label] of bannedPatterns) {
+    if (pattern.test(code)) {
+      errors.push(`Banned in app.js: ${label}`);
+    }
+  }
+  if (!/\bconst\s+App\s*=/.test(code) && !/\bfunction\s+App\s*\(/.test(code)) {
+    errors.push("Missing App component (const App = ... or function App(...))");
+  }
+  return errors;
+}
+
 /** Platform-controlled frontend shell. AI only fills {{APP_BODY}}; we guarantee correct Preact/hooks setup. */
 const INDEX_HTML_TEMPLATE = `<!DOCTYPE html>
 <html lang="en">
@@ -146,12 +172,35 @@ const INDEX_HTML_TEMPLATE = `<!DOCTYPE html>
   </body>
 </html>`;
 
-const CODE_SYSTEM = `You generate a full-stack app for Cloudflare:
-1. worker.js - ES module. export default { async fetch(request, env) { ... } }. Route /api/* to API logic, else return env.ASSETS.fetch(request). Use env.DB (D1), env.JWT_SECRET, env.STORAGE (R2) if needed. Implement auth (register/login) and CRUD from the plan. No imports from npm; use inline password hash (crypto.subtle.digest SHA-256 with salt) and JWT (HMAC-SHA256).
-2. index.html - Output ONLY the JavaScript that goes INSIDE the app (the "app body"). The platform provides the HTML shell, script tag, and these in scope: h, render, useState, useEffect, htm, html = htm.bind(h), API_URL = '/api/'. You MUST use useState and useEffect directly (e.g. const [x, setX] = useState(0)). Do NOT use h.preact.useState or h.preact.useEffect. Do NOT add any import lines or script/html tags. Define your components (e.g. LoginForm, App) and the root App component. Do not include the render() call or getElementById('root') - the platform adds that.
-3. migration.sql - SQLite/D1: CREATE TABLE IF NOT EXISTS for each table; add indexes.
+const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app:
 
-Output exactly three blocks, each starting with a line ---FILE:filename--- and ending before the next ---FILE:--- or end of message. No other text.`;
+1. worker.js
+- Full ES module Worker file.
+- Must export default { async fetch(request, env) { ... } }.
+- Route /api/* to API logic, otherwise return env.ASSETS.fetch(request).
+- Use env.DB (D1), env.JWT_SECRET, env.STORAGE (R2) if needed.
+- Implement auth and CRUD from the plan.
+- No npm imports; use inline password hash (crypto.subtle.digest SHA-256 with salt) and JWT (HMAC-SHA256).
+
+2. app.js
+- This is NOT a full HTML file. Output only JavaScript for insertion into an existing platform-owned HTML template.
+- The template already provides: script type="module", imports for h, render, useState, useEffect, htm, const html = htm.bind(h), const API_URL = '/api/', and the final render(html\`<\${App} />\`, root).
+- Do NOT output: <!DOCTYPE html>, <html>, <head>, <body>, <script>, import statements, const html = ..., const API_URL = ..., render(...), or document.getElementById(...).
+- You MUST define const App = () => { ... } as the root component. Child components may be defined before App.
+- Hooks (useState, useEffect) may ONLY be called inside component functions, never at the top level of app.js.
+- Use htm tagged template syntax (html\`...\`), not JSX. Use camelCase handlers: onClick, onInput, onChange, onSubmit.
+
+3. migration.sql
+- Full SQLite/D1 migration. CREATE TABLE IF NOT EXISTS for each table; add indexes where useful.
+
+Output exactly three blocks:
+---FILE:worker.js---
+...
+---FILE:app.js---
+...
+---FILE:migration.sql---
+...
+No other text.`;
 
 export async function generateCode(
   env: Env,
@@ -182,16 +231,16 @@ export async function generateCode(
     const name = m[1].trim();
     const content = m[2].trim();
     if (name === "worker.js") files.workerJs = content;
-    else if (name === "index.html") files.indexHtml = content;
+    else if (name === "app.js") files.appJs = content;
     else if (name === "migration.sql") files.migrationSql = content;
   }
 
-  if (!files.workerJs || !files.indexHtml || !files.migrationSql) {
+  if (!files.workerJs || !files.appJs || !files.migrationSql) {
     throw new Error("AI did not return all three files. Got: " + Object.keys(files).join(", "));
   }
 
   // Normalize app body: fix AI mistakes so useState/useEffect work (they're in scope from template).
-  let appBody = files.indexHtml
+  let appBody = files.appJs
     .replace(/\bh\.preact\.useState\b/g, "useState")
     .replace(/\bh\.preact\.useEffect\b/g, "useEffect");
 
@@ -228,6 +277,11 @@ export async function generateCode(
     .split("\n")
     .filter((line) => !STRIP_LINES.has(line.trim()))
     .join("\n");
+
+  const validationErrors = validateAppBody(appBody);
+  if (validationErrors.length > 0) {
+    throw new Error("app.js validation failed: " + validationErrors.join("; "));
+  }
 
   const indexHtml = INDEX_HTML_TEMPLATE.replace("{{APP_BODY}}", appBody);
 
