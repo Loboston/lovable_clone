@@ -354,6 +354,7 @@ const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app:
 - For fetch calls, always check res.ok before using response data.
 - For non-2xx responses, read the JSON error body and surface a user-friendly error message.
 - Do not assume every response is a successful payload.
+- Use the provided API_URL for every backend request. Never hardcode '/api/' or '/api/...'.
 
 
 3. migration.sql
@@ -368,6 +369,28 @@ Output exactly three blocks:
 ...
 No other text.`;
 
+/** Max number of retries after validation failure (1 initial + 2 retries = 3 attempts). */
+const MAX_CODE_RETRIES = 2;
+
+/**
+ * Parse AI response text into the three file contents.
+ * Returns null if any file is missing.
+ */
+function parseCodeResponse(text: string): Record<string, string> | null {
+  const fileRegex = /---FILE:(\S+)---\s*([\s\S]*?)(?=---FILE:\S+---|$)/g;
+  const files: Record<string, string> = {};
+  let m: RegExpExecArray | null;
+  while ((m = fileRegex.exec(text)) !== null) {
+    const name = m[1].trim();
+    const content = m[2].trim();
+    if (name === "worker.js") files.workerJs = content;
+    else if (name === "app.js") files.appJs = content;
+    else if (name === "migration.sql") files.migrationSql = content;
+  }
+  if (!files.workerJs || !files.appJs || !files.migrationSql) return null;
+  return files;
+}
+
 export async function generateCode(
   env: Env,
   plan: AppPlan,
@@ -379,54 +402,59 @@ export async function generateCode(
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
 
-  const messages = [
-    { role: "system" as const, content: CODE_SYSTEM },
+  const messages: { role: "user" | "assistant" | "system"; content: string }[] = [
+    { role: "system", content: CODE_SYSTEM },
     {
-      role: "user" as const,
+      role: "user",
       content: `Plan:\n${planStr}\n\nRecent conversation:\n${convStr}\n\nGenerate the three files now.`,
     },
   ];
 
-  const out = await env.AI.run(MODEL as never, {
-    messages,
-    stream: false,
-  } as never);
+  let lastValidationErrors = "";
+  let attempt = 0;
 
-  const text = getTextFromAiResponse(out);
-  const fileRegex = /---FILE:(\S+)---\s*([\s\S]*?)(?=---FILE:\S+---|$)/g;
-  const files: Record<string, string> = {};
+  while (attempt <= MAX_CODE_RETRIES) {
+    if (attempt > 0) {
+      messages.push({
+        role: "user",
+        content: `The previous output failed validation: ${lastValidationErrors}. Fix only the reported issues and output the same three files again (---FILE:worker.js---, ---FILE:app.js---, ---FILE:migration.sql---).`,
+      });
+    }
 
-  let m: RegExpExecArray | null;
-  while ((m = fileRegex.exec(text)) !== null) {
-    const name = m[1].trim();
-    const content = m[2].trim();
+    const out = await env.AI.run(MODEL as never, {
+      messages,
+      stream: false,
+    } as never);
 
-    if (name === "worker.js") files.workerJs = content;
-    else if (name === "app.js") files.appJs = content;
-    else if (name === "migration.sql") files.migrationSql = content;
+    const text = getTextFromAiResponse(out);
+    const files = parseCodeResponse(text);
+
+    if (!files) {
+      throw new Error("AI did not return all three files. Response could not be parsed into worker.js, app.js, and migration.sql.");
+    }
+
+    const workerValidationErrors = validateWorkerJs(files.workerJs);
+    const appBody = normalizeAppBody(files.appJs);
+    const appValidationErrors = validateAppBody(appBody);
+    const allErrors = [...workerValidationErrors, ...appValidationErrors];
+
+    if (allErrors.length === 0) {
+      const indexHtml = INDEX_HTML_TEMPLATE.replace("{{APP_BODY}}", appBody);
+      return {
+        workerJs: files.workerJs,
+        indexHtml,
+        migrationSql: files.migrationSql,
+      };
+    }
+
+    lastValidationErrors = allErrors.join("; ");
+    if (attempt >= MAX_CODE_RETRIES) {
+      throw new Error("Validation failed after " + (MAX_CODE_RETRIES + 1) + " attempts. Last errors: " + lastValidationErrors);
+    }
+
+    messages.push({ role: "assistant", content: text });
+    attempt++;
   }
 
-  if (!files.workerJs || !files.appJs || !files.migrationSql) {
-    throw new Error("AI did not return all three files. Got: " + Object.keys(files).join(", "));
-  }
-
-  const workerValidationErrors = validateWorkerJs(files.workerJs);
-  if (workerValidationErrors.length > 0) {
-    throw new Error("worker.js validation failed: " + workerValidationErrors.join("; "));
-  }
-
-  const appBody = normalizeAppBody(files.appJs);
-
-  const validationErrors = validateAppBody(appBody);
-  if (validationErrors.length > 0) {
-    throw new Error("app.js validation failed: " + validationErrors.join("; "));
-  }
-
-  const indexHtml = INDEX_HTML_TEMPLATE.replace("{{APP_BODY}}", appBody);
-
-  return {
-    workerJs: files.workerJs,
-    indexHtml,
-    migrationSql: files.migrationSql,
-  };
+  throw new Error("Validation failed: " + lastValidationErrors);
 }
