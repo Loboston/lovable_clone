@@ -222,7 +222,8 @@ const INDEX_HTML_TEMPLATE = `<!DOCTYPE html>
   import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';
   import htm from 'https://esm.sh/htm@3';
   const html = htm.bind(h);
-  const API_URL = '/api/';
+  // When served at /apps/:projectId/, send API requests there so the app worker handles them.
+  const API_URL = (() => { const m = document.location.pathname.match(/^\\/apps\\/([^/]+)/); return m ? \`/apps/\${m[1]}/api/\` : '/api/'; })();
 
   {{APP_BODY}}
 
