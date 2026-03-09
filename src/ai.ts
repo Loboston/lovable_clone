@@ -147,8 +147,9 @@ function validateAppBody(code: string): string[] {
     [/\bApp\.toString\s*=/, "App.toString override"],
     [/\bexport\s+default\b/, "export default"],
     [/\bReact\./, "React.* API"],
-    [/return\s*<\s*[A-Za-z]/, "JSX return"],
+    [/return\s*<\s*[A-Za-z]/, "JSX return syntax"],
     [/=\s*<\s*[A-Za-z]/, "JSX assignment"],
+    [/\)\s*=>\s*<\s*[A-Za-z]/, "JSX arrow return"],
     [/^\s*const\s*\{[^}]*\buseState\b[^}]*\}\s*=\s*preact\s*;?\s*$/m, "preact global destructuring"],
     [/^\s*const\s*\{[^}]*\brender\b[^}]*\}\s*=\s*preact\s*;?\s*$/m, "preact render destructuring"],
   ];
@@ -353,7 +354,7 @@ const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app:
 - For fetch calls, always check res.ok before using response data.
 - For non-2xx responses, read the JSON error body and surface a user-friendly error message.
 - Do not assume every response is a successful payload.
-- Use the provided API_URL for every backend request. Never hardcode '/api/' or '/api/...'.
+
 
 3. migration.sql
 - Full SQLite/D1 migration. CREATE TABLE IF NOT EXISTS for each table; add indexes where useful.
