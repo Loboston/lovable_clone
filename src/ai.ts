@@ -147,7 +147,8 @@ function validateAppBody(code: string): string[] {
     [/\bApp\.toString\s*=/, "App.toString override"],
     [/\bexport\s+default\b/, "export default"],
     [/\bReact\./, "React.* API"],
-    [/<[A-Za-z][^>]*>/, "raw JSX/HTML tag"],
+    [/return\s*<\s*[A-Za-z]/, "JSX return"],
+    [/=\s*<\s*[A-Za-z]/, "JSX assignment"],
     [/^\s*const\s*\{[^}]*\buseState\b[^}]*\}\s*=\s*preact\s*;?\s*$/m, "preact global destructuring"],
     [/^\s*const\s*\{[^}]*\brender\b[^}]*\}\s*=\s*preact\s*;?\s*$/m, "preact render destructuring"],
   ];
