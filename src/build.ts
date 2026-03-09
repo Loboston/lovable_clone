@@ -34,7 +34,9 @@ export async function buildProject(
   const { workerJs, indexHtml: rawIndexHtml, migrationSql } = await generateCode(env, plan, conversation);
 
   // Replace {{API_BASE}} so the app's fetch() calls hit the same-origin API under /apps/:projectId/
-  const apiBase = `/apps/${projectId}/api/`;
+  // We intentionally do NOT include '/api' here, because generated code commonly uses `${API_URL}/api/...`.
+  // This keeps the final path as /apps/:projectId/api/... instead of /apps/:projectId/api//api/...
+  const apiBase = `/apps/${projectId}`;
   const indexHtml = rawIndexHtml.replace(/\{\{API_BASE\}\}/g, apiBase);
 
   const prefix = `projects/${projectId}/`;
