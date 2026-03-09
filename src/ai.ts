@@ -2,13 +2,15 @@ import type { Env, AppPlan } from "./types";
 
 const MODEL = "@cf/zai-org/glm-4.7-flash";
 
-
 const CHAT_SYSTEM =
   "You are a friendly assistant for an app builder. The user describes the app they want. " +
   "You must ONLY give a short acknowledgment (1–2 sentences). Examples: 'Got it, I've noted you want a todo app. Click Deploy when you're ready to build it.' or 'Noted! Add more details if you like, or click Deploy to generate your app.' " +
   "Do NOT output any code, file contents, HTML, markdown code blocks, or images. Do NOT start with 'Sure!' or 'Here is...' and then paste code. Just acknowledge briefly.";
 
-function historyToPrompt(history: { role: string; content: string }[], userMessage: string): string {
+function historyToPrompt(
+  history: { role: string; content: string }[],
+  userMessage: string
+): string {
   let prompt = CHAT_SYSTEM + "\n\n";
   for (const m of history) {
     prompt += (m.role === "user" ? "User: " : "Assistant: ") + m.content + "\n\n";
@@ -87,8 +89,7 @@ export async function generatePlan(
     })),
     {
       role: "user" as const,
-      content:
-        "Output the JSON plan only, no other text.",
+      content: "Output the JSON plan only, no other text.",
     },
   ];
 
@@ -100,12 +101,12 @@ export async function generatePlan(
   const text = getTextFromAiResponse(out);
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   const jsonStr = jsonMatch ? jsonMatch[0] : text;
+
   let plan: AppPlan;
   try {
     plan = JSON.parse(jsonStr) as AppPlan;
   } catch {
-    const rawStr =
-      typeof out === "string" ? out : JSON.stringify(out, null, 2);
+    const rawStr = typeof out === "string" ? out : JSON.stringify(out, null, 2);
     const rawPreview = rawStr.slice(0, 800);
     throw new Error(
       "AI did not return valid plan JSON. Extracted text: " +
@@ -114,15 +115,21 @@ export async function generatePlan(
         rawPreview
     );
   }
+
   if (!plan.appName || !plan.pages || !plan.dataModel?.tables) {
     throw new Error("Plan missing required fields: " + JSON.stringify(plan));
   }
+
   return plan;
 }
 
-/** Returns validation errors for the app body. Empty array = valid. */
+/**
+ * Returns validation errors for the generated app.js fragment.
+ * Empty array = valid enough to inject into the platform template.
+ */
 function validateAppBody(code: string): string[] {
   const errors: string[] = [];
+
   const bannedPatterns: [RegExp, string][] = [
     [/<!DOCTYPE/i, "DOCTYPE"],
     [/<html[\s>]/i, "<html>"],
@@ -130,23 +137,57 @@ function validateAppBody(code: string): string[] {
     [/<body[\s>]/i, "<body>"],
     [/<script[\s>]/i, "<script>"],
     [/^\s*import\s+/m, "import statement"],
-    [/document\.getElementById\s*\(/, "document.getElementById"],
-    [/\bconst\s+html\s*=/, "const html ="],
-    [/\bconst\s+API_URL\s*=/, "const API_URL ="],
+    [/document\.getElementById\s*\(/, "document.getElementById(...)"],
+    [/\bconst\s+html\s*=/, "const html = ..."],
+    [/\bconst\s+API_URL\s*=/, "const API_URL = ..."],
     [/```/, "markdown code fence"],
+    [/\bApp\.toString\s*=/, "App.toString override"],
+    [/\bexport\s+default\b/, "export default"],
+    [/\bReact\./, "React.* API"],
+    [/<[A-Za-z][^>]*>/, "raw JSX/HTML tag"],
   ];
+
   for (const [pattern, label] of bannedPatterns) {
     if (pattern.test(code)) {
       errors.push(`Banned in app.js: ${label}`);
     }
   }
-  if (!/\bconst\s+App\s*=/.test(code) && !/\bfunction\s+App\s*\(/.test(code)) {
+
+  const appMatch = code.match(/\bconst\s+App\s*=|\bfunction\s+App\s*\(/);
+  if (!appMatch || appMatch.index === undefined) {
     errors.push("Missing App component (const App = ... or function App(...))");
+  } else {
+    const beforeApp = code.slice(0, appMatch.index);
+
+    if (/\buseState\s*\(/.test(beforeApp) || /\buseEffect\s*\(/.test(beforeApp)) {
+      errors.push("Hooks appear before App definition; possible top-level hook usage");
+    }
   }
+
+  const lowercaseHandlers = [
+    "onclick",
+    "onchange",
+    "oninput",
+    "onkeypress",
+    "onkeydown",
+    "onsubmit",
+  ];
+
+  for (const handler of lowercaseHandlers) {
+    const re = new RegExp(`\\b${handler}\\s*=`);
+    if (re.test(code)) {
+      errors.push(`Use camelCase event handlers instead of ${handler}`);
+    }
+  }
+
+  if (!/html\s*`/.test(code)) {
+    errors.push("Expected htm template usage: html`...`");
+  }
+
   return errors;
 }
 
-/** Platform-controlled frontend shell. AI only fills {{APP_BODY}}; we guarantee correct Preact/hooks setup. */
+/** Platform-controlled frontend shell. AI generates app.js, which is injected into {{APP_BODY}}. */
 const INDEX_HTML_TEMPLATE = `<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -185,10 +226,13 @@ const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app:
 2. app.js
 - This is NOT a full HTML file. Output only JavaScript for insertion into an existing platform-owned HTML template.
 - The template already provides: script type="module", imports for h, render, useState, useEffect, htm, const html = htm.bind(h), const API_URL = '/api/', and the final render(html\`<\${App} />\`, root).
-- Do NOT output: <!DOCTYPE html>, <html>, <head>, <body>, <script>, import statements, const html = ..., const API_URL = ..., render(...), or document.getElementById(...).
+- Do NOT output: <!DOCTYPE html>, <html>, <head>, <body>, <script>, import statements, const html = ..., const API_URL = ..., render(...), document.getElementById(...), export default, App.toString = ..., or JSX.
 - You MUST define const App = () => { ... } as the root component. Child components may be defined before App.
 - Hooks (useState, useEffect) may ONLY be called inside component functions, never at the top level of app.js.
-- Use htm tagged template syntax (html\`...\`), not JSX. Use camelCase handlers: onClick, onInput, onChange, onSubmit.
+- Never place useState(...) or useEffect(...) above the App component definition.
+- Use htm tagged template syntax (html\`...\`), not JSX.
+- Use camelCase handlers only: onClick, onInput, onChange, onSubmit, onKeyDown.
+- Do not include comments explaining the code.
 
 3. migration.sql
 - Full SQLite/D1 migration. CREATE TABLE IF NOT EXISTS for each table; add indexes where useful.
@@ -215,7 +259,10 @@ export async function generateCode(
 
   const messages = [
     { role: "system" as const, content: CODE_SYSTEM },
-    { role: "user" as const, content: `Plan:\n${planStr}\n\nRecent conversation:\n${convStr}\n\nGenerate the three files now.` },
+    {
+      role: "user" as const,
+      content: `Plan:\n${planStr}\n\nRecent conversation:\n${convStr}\n\nGenerate the three files now.`,
+    },
   ];
 
   const out = await env.AI.run(MODEL as never, {
@@ -226,10 +273,12 @@ export async function generateCode(
   const text = getTextFromAiResponse(out);
   const fileRegex = /---FILE:(\S+)---\s*([\s\S]*?)(?=---FILE:\S+---|$)/g;
   const files: Record<string, string> = {};
+
   let m: RegExpExecArray | null;
   while ((m = fileRegex.exec(text)) !== null) {
     const name = m[1].trim();
     const content = m[2].trim();
+
     if (name === "worker.js") files.workerJs = content;
     else if (name === "app.js") files.appJs = content;
     else if (name === "migration.sql") files.migrationSql = content;
@@ -239,32 +288,26 @@ export async function generateCode(
     throw new Error("AI did not return all three files. Got: " + Object.keys(files).join(", "));
   }
 
-  // Normalize app body: fix AI mistakes so useState/useEffect work (they're in scope from template).
+  // Normalize app body: fix common AI mistakes so hooks/globals use the template-provided scope.
   let appBody = files.appJs
     .replace(/\bh\.preact\.useState\b/g, "useState")
     .replace(/\bh\.preact\.useEffect\b/g, "useEffect");
 
-  // Strip lines that redeclare shell-provided globals (exact match only).
-  // Template already provides: import h, render, useState, useEffect, htm; const html, API_URL.
+  // Strip exact lines that redeclare shell-provided globals or duplicate mount logic.
   const STRIP_LINES = new Set([
-    // html
     "const html = htm.bind(h);",
     "const html = htm.bind(h)",
-    // API_URL
     "const API_URL = '/api/';",
     "const API_URL = \"/api/\";",
     "const API_URL = '/api/'",
     "const API_URL = \"/api/\"",
-    // useState/useEffect (e.g. const { useState, useEffect } = globalThis)
     "const { useState, useEffect } = globalThis;",
     "const { useState, useEffect } = globalThis",
     "const {useState, useEffect} = globalThis;",
     "const {useState, useEffect} = globalThis",
-    // Duplicate imports (exact template lines)
     "import { h, render } from 'https://esm.sh/preact@10';",
     "import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';",
     "import htm from 'https://esm.sh/htm@3';",
-    // Stray render (template does render(html`<${App} />`, root) after APP_BODY)
     "render(App);",
     "render(App)",
     "render(html`<${App} />`, root);",
@@ -272,6 +315,7 @@ export async function generateCode(
     "render(html`<${App} />`, document.getElementById('root'));",
     "render(html`<${App} />`, document.getElementById('root'))",
   ]);
+
   appBody = appBody
     .replace(/\r\n/g, "\n")
     .split("\n")
