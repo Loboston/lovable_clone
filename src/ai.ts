@@ -137,6 +137,9 @@ function validateAppBody(code: string): string[] {
     [/<body[\s>]/i, "<body>"],
     [/<script[\s>]/i, "<script>"],
     [/^\s*import\s+/m, "import statement"],
+    [/^\s*import\s+.*from\s+['"]preact(?:\/hooks)?['"]\s*;?\s*$/m, "preact import"],
+    [/^\s*import\s+.*from\s+['"]https:\/\/esm\.sh\/preact@10(?:\/hooks)?['"]\s*;?\s*$/m, "preact esm import"],
+    [/^\s*import\s+.*from\s+['"]https:\/\/esm\.sh\/htm@3['"]\s*;?\s*$/m, "htm import"],
     [/document\.getElementById\s*\(/, "document.getElementById(...)"],
     [/\bconst\s+html\s*=/, "const html = ..."],
     [/\bconst\s+API_URL\s*=/, "const API_URL = ..."],
@@ -145,6 +148,8 @@ function validateAppBody(code: string): string[] {
     [/\bexport\s+default\b/, "export default"],
     [/\bReact\./, "React.* API"],
     [/<[A-Za-z][^>]*>/, "raw JSX/HTML tag"],
+    [/^\s*const\s*\{[^}]*\buseState\b[^}]*\}\s*=\s*preact\s*;?\s*$/m, "preact global destructuring"],
+    [/^\s*const\s*\{[^}]*\brender\b[^}]*\}\s*=\s*preact\s*;?\s*$/m, "preact render destructuring"],
   ];
 
   for (const [pattern, label] of bannedPatterns) {
@@ -184,6 +189,10 @@ function validateAppBody(code: string): string[] {
     errors.push("Expected htm template usage: html`...`");
   }
 
+  if (/\.map\s*\([^)]*\)\s*\.join\s*\(\s*['"]\s*['"]\s*\)/.test(code)) {
+    errors.push("Suspicious .join('') after .map(...) in app.js");
+  }
+
   return errors;
 }
 
@@ -191,19 +200,85 @@ function validateAppBody(code: string): string[] {
 function validateWorkerJs(code: string): string[] {
   const errors: string[] = [];
 
-  // Plain-text "Not Found" (or similar) causes frontend res.json() to throw; API must return JSON.
   if (/new\s+Response\s*\(\s*["'][^"']+["']\s*,\s*\{\s*status\s*:\s*(400|401|403|404|500)/i.test(code)) {
     errors.push("worker.js: API error responses should use Response.json(...), not plain-text new Response(...)");
   }
 
-  // request.json() without try/catch can throw on invalid JSON and surface as non-JSON response.
   if (/await\s+request\.json\s*\(\s*\)/.test(code) && (!/\btry\s*\{/.test(code) || !/\bcatch\s*\(/.test(code))) {
     errors.push(
       "worker.js: Wrap request.json() in try/catch and return Response.json({ error: 'Invalid JSON' }, { status: 400 }) on failure"
     );
   }
 
+  if (!/\bResponse\.json\s*\(/.test(code)) {
+    errors.push("worker.js: Expected Response.json(...) for API responses");
+  }
+
   return errors;
+}
+
+/**
+ * Remove common AI-generated redeclarations/imports that conflict with the template.
+ * This is broader than STRIP_LINES and handles variants.
+ */
+function normalizeAppBody(code: string): string {
+  let out = code
+    .replace(/\bh\.preact\.useState\b/g, "useState")
+    .replace(/\bh\.preact\.useEffect\b/g, "useEffect");
+
+  // Remove common import variants.
+  out = out
+    .replace(/^\s*import\s+.*from\s+['"]preact(?:\/hooks)?['"]\s*;?\s*$/gm, "")
+    .replace(/^\s*import\s+.*from\s+['"]https:\/\/esm\.sh\/preact@10(?:\/hooks)?['"]\s*;?\s*$/gm, "")
+    .replace(/^\s*import\s+.*from\s+['"]https:\/\/esm\.sh\/htm@3['"]\s*;?\s*$/gm, "");
+
+  // Remove common redeclarations of template-provided globals.
+  out = out
+    .replace(/^\s*const\s+html\s*=\s*htm\.bind\(h\)\s*;?\s*$/gm, "")
+    .replace(/^\s*const\s+API_URL\s*=\s*['"][^'"]*['"]\s*;?\s*$/gm, "")
+    .replace(/^\s*const\s*\{\s*useState\s*,\s*useEffect\s*\}\s*=\s*globalThis\s*;?\s*$/gm, "")
+    .replace(/^\s*const\s*\{[^}]*\bh\b[^}]*\brender\b[^}]*\bhtml\b[^}]*\buseState\b[^}]*\buseEffect\b[^}]*\}\s*=\s*preact\s*;?\s*$/gm, "")
+    .replace(/^\s*const\s*\{[^}]*\buseState\b[^}]*\buseEffect\b[^}]*\}\s*=\s*preact\s*;?\s*$/gm, "");
+
+  // Remove duplicate mount calls.
+  out = out
+    .replace(/^\s*render\s*\(\s*App\s*\)\s*;?\s*$/gm, "")
+    .replace(/^\s*render\s*\(\s*html`<\$\{App\}\s*\/?>`\s*,\s*root\s*\)\s*;?\s*$/gm, "")
+    .replace(/^\s*render\s*\(\s*html`<\$\{App\}\s*\/?>`\s*,\s*document\.getElementById\(['"]root['"]\)\s*\)\s*;?\s*$/gm, "");
+
+  // Keep the old exact-line stripping too, as a safety net.
+  const STRIP_LINES = new Set([
+    "const html = htm.bind(h);",
+    "const html = htm.bind(h)",
+    "const API_URL = '/api/';",
+    "const API_URL = \"/api/\";",
+    "const API_URL = '/api/'",
+    "const API_URL = \"/api/\"",
+    "const { useState, useEffect } = globalThis;",
+    "const { useState, useEffect } = globalThis",
+    "const {useState, useEffect} = globalThis;",
+    "const {useState, useEffect} = globalThis",
+    "import { h, render } from 'https://esm.sh/preact@10';",
+    "import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';",
+    "import htm from 'https://esm.sh/htm@3';",
+    "render(App);",
+    "render(App)",
+    "render(html`<${App} />`, root);",
+    "render(html`<${App} />`, root)",
+    "render(html`<${App} />`, document.getElementById('root'));",
+    "render(html`<${App} />`, document.getElementById('root'))",
+  ]);
+
+  out = out
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => !STRIP_LINES.has(line.trim()))
+    .join("\n");
+
+  // Collapse repeated blank lines.
+  out = out.replace(/\n{3,}/g, "\n\n").trim();
+
+  return out;
 }
 
 /** Platform-controlled frontend shell. AI generates app.js, which is injected into {{APP_BODY}}. */
@@ -222,8 +297,10 @@ const INDEX_HTML_TEMPLATE = `<!DOCTYPE html>
   import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';
   import htm from 'https://esm.sh/htm@3';
   const html = htm.bind(h);
-  // When served at /apps/:projectId/, send API requests there so the app worker handles them.
-  const API_URL = (() => { const m = document.location.pathname.match(/^\\/apps\\/([^/]+)/); return m ? \`/apps/\${m[1]}/api/\` : '/api/'; })();
+  const API_URL = (() => {
+    const m = document.location.pathname.match(/^\\/apps\\/([^/]+)/);
+    return m ? \`/apps/\${m[1]}/api/\` : '/api/';
+  })();
 
   {{APP_BODY}}
 
@@ -247,8 +324,10 @@ const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app:
 
 2. app.js
 - This is NOT a full HTML file. Output only JavaScript for insertion into an existing platform-owned HTML template.
-- The template already provides: script type="module", imports for h, render, useState, useEffect, htm, const html = htm.bind(h), const API_URL = '/api/', and the final render(html\`<\${App} />\`, root).
+- The template already provides: script type="module", imports for h, render, useState, useEffect, htm, const html = htm.bind(h), const API_URL = platform-provided value, and the final render(html\`<\${App} />\`, root).
 - Do NOT output: <!DOCTYPE html>, <html>, <head>, <body>, <script>, import statements, const html = ..., const API_URL = ..., render(...), document.getElementById(...), export default, App.toString = ..., or JSX.
+- Do NOT import from 'preact', 'preact/hooks', or 'htm'.
+- Do NOT destructure h, render, html, useState, or useEffect from preact, globalThis, or any other global.
 - You MUST define const App = () => { ... } as the root component. Child components may be defined before App.
 - Hooks (useState, useEffect) may ONLY be called inside component functions, never at the top level of app.js.
 - Never place useState(...) or useEffect(...) above the App component definition.
@@ -318,39 +397,7 @@ export async function generateCode(
     throw new Error("worker.js validation failed: " + workerValidationErrors.join("; "));
   }
 
-  // Normalize app body: fix common AI mistakes so hooks/globals use the template-provided scope.
-  let appBody = files.appJs
-    .replace(/\bh\.preact\.useState\b/g, "useState")
-    .replace(/\bh\.preact\.useEffect\b/g, "useEffect");
-
-  // Strip exact lines that redeclare shell-provided globals or duplicate mount logic.
-  const STRIP_LINES = new Set([
-    "const html = htm.bind(h);",
-    "const html = htm.bind(h)",
-    "const API_URL = '/api/';",
-    "const API_URL = \"/api/\";",
-    "const API_URL = '/api/'",
-    "const API_URL = \"/api/\"",
-    "const { useState, useEffect } = globalThis;",
-    "const { useState, useEffect } = globalThis",
-    "const {useState, useEffect} = globalThis;",
-    "const {useState, useEffect} = globalThis",
-    "import { h, render } from 'https://esm.sh/preact@10';",
-    "import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';",
-    "import htm from 'https://esm.sh/htm@3';",
-    "render(App);",
-    "render(App)",
-    "render(html`<${App} />`, root);",
-    "render(html`<${App} />`, root)",
-    "render(html`<${App} />`, document.getElementById('root'));",
-    "render(html`<${App} />`, document.getElementById('root'))",
-  ]);
-
-  appBody = appBody
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .filter((line) => !STRIP_LINES.has(line.trim()))
-    .join("\n");
+  const appBody = normalizeAppBody(files.appJs);
 
   const validationErrors = validateAppBody(appBody);
   if (validationErrors.length > 0) {
