@@ -181,7 +181,7 @@ const INDEX_HTML_SCAFFOLD = `<!DOCTYPE html>
   import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';
   import htm from 'https://esm.sh/htm@3';
   const html = htm.bind(h);
-  const API_URL = "{{API_BASE}}";
+  const API_URL = "{{API_BASE}}+"/"";
 
   const App = () => html\`<div>Your app here</div>\`;
   const root = document.getElementById('root');
@@ -206,7 +206,7 @@ const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app. 
 - A complete, standalone HTML file. Use this structure as your scaffold (rewrite the whole file with your app logic):
 ${INDEX_HTML_SCAFFOLD}
 - You MUST keep exactly: const API_URL = "{{API_BASE}}"; so the platform can inject the correct API base for preview/deploy. Do not replace {{API_BASE}} yourself.
-- API_URL already includes the '/api/' prefix; when calling the backend, append only the rest of the path (for example, fetch(API_URL + 'todos'), not API_URL + '/api/todos').
+- API_URL already includes the '/api/' prefix; when calling the backend, append only the rest of the path (for example, fetch(API_URL + '/todos'), not API_URL + '/api/todos').
 - Use htm + Preact (import from esm.sh as in scaffold). Use html\`...\` tagged templates, not JSX.
 - Define your root component (e.g. const App = () => ...) and mount with render(html\`<\${App} />\`, root).
 - Use camelCase event handlers: onClick, onInput, onChange, onSubmit, onKeyDown.
