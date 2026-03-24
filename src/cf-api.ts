@@ -36,7 +36,7 @@ export async function createD1Database(
   const data = (await res.json()) as {
     success?: boolean;
     result?: { uuid?: string; database_id?: string; name?: string };
-    errors?: unknown[];
+    errors?: Array<{ code?: number; message?: string }>;
   };
   if (!data.success || !data.result) {
     throw new Error("Failed to create D1 database: " + JSON.stringify(data.errors ?? data));
@@ -45,6 +45,54 @@ export async function createD1Database(
   const uuid = r?.uuid ?? r?.database_id ?? "";
   if (!uuid) throw new Error("D1 create did not return uuid: " + JSON.stringify(data.result));
   return { uuid, name: r?.name ?? name };
+}
+
+/** List D1 databases in the account (first page). */
+export async function listD1Databases(
+  accountId: string,
+  apiToken: string
+): Promise<Array<{ uuid: string; name: string }>> {
+  const res = await cfFetch(accountId, apiToken, `/accounts/${accountId}/d1/database`, {
+    method: "GET",
+  });
+  const data = (await res.json()) as {
+    success?: boolean;
+    result?: Array<{ uuid?: string; name?: string }>;
+    errors?: unknown[];
+  };
+  if (!data.success || !Array.isArray(data.result)) {
+    throw new Error("Failed to list D1 databases: " + JSON.stringify(data.errors ?? data));
+  }
+  return data.result
+    .map((r) => ({ uuid: r.uuid ?? "", name: r.name ?? "" }))
+    .filter((d) => d.uuid.length > 0);
+}
+
+/**
+ * Create D1 or return existing uuid when name is already taken (e.g. retry after a failed deploy).
+ */
+export async function getOrCreateD1Database(
+  accountId: string,
+  apiToken: string,
+  name: string
+): Promise<CreateD1Result> {
+  try {
+    return await createD1Database(accountId, apiToken, name);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const already =
+      msg.includes("7502") ||
+      msg.toLowerCase().includes("already exists");
+    if (!already) throw err;
+    const list = await listD1Databases(accountId, apiToken);
+    const found = list.find((d) => d.name === name);
+    if (!found) {
+      throw new Error(
+        "D1 name is already in use but not found in account list: " + name + ". Original: " + msg
+      );
+    }
+    return { uuid: found.uuid, name: found.name };
+  }
 }
 
 /** True if sql is empty, only whitespace, semicolons, or only comments — i.e. not a real query. */

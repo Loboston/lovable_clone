@@ -1,7 +1,7 @@
 import type { Env } from "./types";
 import { generatePlan, generateCode } from "./ai";
 import {
-  createD1Database,
+  getOrCreateD1Database,
   runD1Query,
   deployUserWorker,
   isEmptyOrNoQuery,
@@ -45,7 +45,17 @@ export async function buildProject(
   await env.CODE_BUCKET.put(`${prefix}migration.sql`, migrationSql);
 
   const dbName = `app-${projectId}`;
-  const { uuid: d1DatabaseId } = await createD1Database(accountId, apiToken, dbName);
+  const existingRow = await env.DB.prepare(
+    "SELECT d1_database_id FROM projects WHERE id = ?"
+  )
+    .bind(projectId)
+    .first<{ d1_database_id: string | null }>();
+
+  const existingId = existingRow?.d1_database_id?.trim() ?? "";
+  const d1DatabaseId =
+    existingId.length > 0
+      ? existingId
+      : (await getOrCreateD1Database(accountId, apiToken, dbName)).uuid;
 
   const statements = migrationSql
     .split(";")
