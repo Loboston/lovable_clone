@@ -17,9 +17,9 @@ app.route("/api/auth", authRoutes);
 app.route("/api/chat", chatRoutes);
 app.route("/api/projects", projectRoutes);
 
-app.get("/apps/:projectId/*", async (c) => {
+// Forward all methods (GET/POST/PUT/DELETE/...) so generated apps' APIs reach the user Worker.
+app.all("/apps/:projectId/*", async (c) => {
   const projectId = c.req.param("projectId");
-  const rest = c.req.param("*") ?? "";
   const workerName = `app-${projectId}`;
 
   const worker = c.env.DISPATCHER;
@@ -53,7 +53,7 @@ app.get("/apps/:projectId/*", async (c) => {
   });
 });
 
-app.get("/apps/:projectId", async (c) => {
+app.all("/apps/:projectId", async (c) => {
   const projectId = c.req.param("projectId");
   const workerName = `app-${projectId}`;
   const worker = c.env.DISPATCHER;
