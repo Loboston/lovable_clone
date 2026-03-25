@@ -181,7 +181,7 @@ const INDEX_HTML_SCAFFOLD = `<!DOCTYPE html>
   import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';
   import htm from 'https://esm.sh/htm@3';
   const html = htm.bind(h);
-  const API_URL = "{{API_BASE}}+"/"";
+  const API_URL = "{{API_BASE}}";
 
   const App = () => html\`<div>Your app here</div>\`;
   const root = document.getElementById('root');
@@ -205,11 +205,12 @@ const CODE_SYSTEM = `You generate exactly three artifacts for a Cloudflare app. 
 2. index.html
 - A complete, standalone HTML file. Use this structure as your scaffold (rewrite the whole file with your app logic):
 ${INDEX_HTML_SCAFFOLD}
-- You MUST keep exactly: const API_URL = "{{API_BASE}}"; so the platform can inject the correct API base for preview/deploy. Do not replace {{API_BASE}} yourself.
-- API_URL already includes the '/api/' prefix; when calling the backend, append only the rest of the path (for example, fetch(API_URL + '/todos'), not API_URL + '/api/todos').
+- You MUST keep exactly: const API_URL = "{{API_BASE}}"; so the platform can inject the path prefix for preview/deploy. Do not replace {{API_BASE}} yourself.
+- API_URL is ONLY /apps/<projectId> (no /api). The worker.js API lives under /api/*. Every fetch to the backend MUST include /api in the path: fetch(API_URL + '/api/notes'), fetch(API_URL + '/api/todos'), fetch(API_URL + '/api/auth/login'), etc. NEVER fetch(API_URL + '/notes') or API_URL + '/todos' without /api/ — that hits the wrong route and returns 404.
 - Use htm + Preact (import from esm.sh as in scaffold). Use html\`...\` tagged templates, not JSX.
 - Define your root component (e.g. const App = () => ...) and mount with render(html\`<\${App} />\`, root).
 - Use camelCase event handlers: onClick, onInput, onChange, onSubmit, onKeyDown.
+- If you split UI into child components (e.g. a row component for each list item), pass parent callbacks as props (onDelete, onEdit). The child must only call props.onDelete(id) or similar — never reference handleDelete directly inside the child if handleDelete is defined in the parent (ReferenceError at runtime).
 - For fetch calls, check res.ok and handle non-2xx by reading JSON error body; show a user-friendly message.
 - Do not include markdown code fences in the output; output raw HTML only.
 
