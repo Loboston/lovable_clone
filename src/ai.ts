@@ -2,40 +2,56 @@ import type { Env, AppPlan } from "./types";
 
 const MODEL = "@cf/zai-org/glm-4.7-flash";
 
+const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
+const AGENT_MODEL = "claude-haiku-4-5-20251001";
+
 const CHAT_SYSTEM =
   "You are a friendly assistant for an app builder. The user describes the app they want. " +
   "You must ONLY give a short acknowledgment (1–2 sentences). Examples: 'Got it, I've noted you want a todo app. Click Deploy when you're ready to build it.' or 'Noted! Add more details if you like, or click Deploy to generate your app.' " +
   "Do NOT output any code, file contents, HTML, markdown code blocks, or images. Do NOT start with 'Sure!' or 'Here is...' and then paste code. Just acknowledge briefly.";
-
-function historyToPrompt(
-  history: { role: string; content: string }[],
-  userMessage: string
-): string {
-  let prompt = CHAT_SYSTEM + "\n\n";
-  for (const m of history) {
-    prompt += (m.role === "user" ? "User: " : "Assistant: ") + m.content + "\n\n";
-  }
-  prompt += "User: " + userMessage + "\n\nAssistant: ";
-  return prompt;
-}
 
 export async function streamChat(
   env: Env,
   userMessage: string,
   history: { role: string; content: string }[]
 ): Promise<ReadableStream<Uint8Array>> {
-  const prompt = historyToPrompt(history, userMessage);
+  const messages = [
+    ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+    { role: "user" as const, content: userMessage },
+  ];
 
-  const response = await env.AI.run(MODEL as never, {
-    prompt,
-    stream: true,
-  } as never);
+  const res = await fetch(ANTHROPIC_API, {
+    method: "POST",
+    headers: {
+      "x-api-key": env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: AGENT_MODEL,
+      max_tokens: 256,
+      system: CHAT_SYSTEM,
+      messages,
+    }),
+  });
 
-  if (!response || typeof (response as { getReader?: unknown })?.getReader !== "function") {
-    throw new Error("AI did not return a stream");
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Anthropic chat error ${res.status}: ${errText}`);
   }
 
-  return response as ReadableStream<Uint8Array>;
+  const data = await res.json() as { content: Array<{ type: string; text: string }> };
+  const text = data.content.find((b) => b.type === "text")?.text ?? "";
+
+  const encoder = new TextEncoder();
+  const ssePayload = `data: ${JSON.stringify({ choices: [{ text }] })}\n\ndata: [DONE]\n\n`;
+
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(ssePayload));
+      controller.close();
+    },
+  });
 }
 
 export async function saveAssistantMessage(
@@ -227,9 +243,6 @@ Output exactly three blocks:
 No other text.`;
 
 // ─── Claude Agent ────────────────────────────────────────────────────────────
-
-const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
-const AGENT_MODEL = "claude-haiku-4-5-20251001";
 
 type AnthropicContentBlock =
   | { type: "text"; text: string }
