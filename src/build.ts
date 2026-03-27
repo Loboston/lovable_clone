@@ -142,13 +142,18 @@ export async function buildProject(
 
   const conversation = (history.results ?? []) as { role: string; content: string }[];
 
-  // Generate the plan using Workers AI (cheap, works well for structured JSON output)
-  const plan = await generatePlan(env, conversation);
+  // Check if this project has been deployed before by looking for existing files in R2
+  const existingWorker = await env.CODE_BUCKET.get(`projects/${projectId}/worker.js`);
+  const isFirstDeploy = existingWorker === null;
+
+  // On first deploy: generate a full plan from conversation
+  // On update deploy: skip plan regeneration to prevent drift (auth screens appearing, layout changes, etc.)
+  const plan = isFirstDeploy ? await generatePlan(env, conversation) : null;
 
   // Run the Claude agent — reads existing files from R2, generates/patches all three,
   // writes them back to R2, then deploys via deployFiles
   const deployFn: DeployFn = (workerJs, indexHtml, migrationSql) =>
     deployFiles(env, projectId, workerJs, indexHtml, migrationSql, baseUrl);
 
-  return await runBuildAgent(env, projectId, plan, conversation, deployFn);
+  return await runBuildAgent(env, projectId, plan, conversation, isFirstDeploy, deployFn);
 }

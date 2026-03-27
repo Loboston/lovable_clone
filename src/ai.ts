@@ -309,9 +309,18 @@ const AGENT_SYSTEM = `You are a code generation agent for a Cloudflare app build
 
 Your job: Generate or update worker.js, index.html, and migration.sql for a user's app, then deploy them.
 
+FIRST DEPLOY vs UPDATE DEPLOY:
+- If you receive a Plan in the user message: this is a FIRST DEPLOY. Generate all three files fresh from the plan. Ignore existing R2 files (they don't exist yet).
+- If you receive NO plan ("No plan — this is an update deploy"): this is an UPDATE DEPLOY.
+  - Read all three existing files from R2 first before making any decisions.
+  - Determine intent from the last user message:
+    * PATCH mode (default): If the request is a small change — color, style, wording, adding one field, fixing a bug — only modify the specific parts that need to change. Preserve ALL existing routes, DB schema, auth logic, components, and page structure.
+    * REWRITE mode: Only do a full rewrite if the user explicitly says "start over", "rebuild from scratch", or asks for a completely different type of app.
+  - In PATCH mode: never add login/auth screens, new pages, or new DB tables unless explicitly asked. Never rename or remove existing DB tables or API routes.
+
 PROCESS (follow in order):
 1. Call read_from_r2 for each of the three files to check what was previously generated
-2. Generate new or patched versions based on the plan, conversation, and any existing files
+2. Generate new or patched versions based on the plan/intent, conversation, and any existing files
 3. Call write_to_r2 for each file
 4. Verify your files meet all requirements below
 5. Call deploy_from_r2
@@ -362,8 +371,9 @@ SELF-CHECK before calling deploy_from_r2:
 export async function runBuildAgent(
   env: Env,
   projectId: string,
-  plan: AppPlan,
+  plan: AppPlan | null,
   conversation: { role: string; content: string }[],
+  isFirstDeploy: boolean,
   deployFn: DeployFn
 ): Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }> {
   const apiKey = env.ANTHROPIC_API_KEY;
@@ -426,16 +436,23 @@ export async function runBuildAgent(
     return `Unknown tool: ${name}`;
   }
 
-  const planStr = JSON.stringify(plan, null, 2);
   const convStr = conversation
     .slice(-10)
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
 
+  const planSection = plan
+    ? `Plan:\n${JSON.stringify(plan, null, 2)}`
+    : `No plan — this is an update deploy. Read the existing files from R2 first, then apply only the changes the user requested.`;
+
+  const instruction = isFirstDeploy
+    ? "Generate all three files fresh from the plan above and deploy."
+    : "Read the existing files from R2, patch only what the user asked for, then deploy.";
+
   const messages: AgentMessage[] = [
     {
       role: "user",
-      content: `Plan:\n${planStr}\n\nRecent conversation:\n${convStr}\n\nProject ID: ${projectId}\n\nStart by reading the existing files from R2, then generate or update all three files and deploy.`,
+      content: `${planSection}\n\nRecent conversation:\n${convStr}\n\nProject ID: ${projectId}\n\n${instruction}`,
     },
   ];
 
