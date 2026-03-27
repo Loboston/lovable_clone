@@ -114,11 +114,11 @@ function render() {
         </header>
         <div class="flex flex-1 overflow-hidden">
           <div class="w-1/2 flex flex-col border-r border-slate-700">
-            <div class="p-2 border-b border-slate-700">
+            <ul id="chatMessages" class="flex-1 overflow-auto p-4 space-y-3"></ul>
+            <div class="p-2 border-t border-slate-700">
               <textarea id="chatInput" rows="2" class="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 resize-none" placeholder="Describe your app..."></textarea>
               <button id="sendBtn" class="mt-2 px-4 py-2 rounded bg-slate-600 hover:bg-slate-700 text-sm">Send</button>
             </div>
-            <ul id="chatMessages" class="flex-1 overflow-auto p-4 space-y-3"></ul>
           </div>
           <div class="w-1/2 flex flex-col bg-slate-950">
             <iframe id="previewFrame" class="flex-1 w-full border-0" src="about:blank" title="Preview"></iframe>

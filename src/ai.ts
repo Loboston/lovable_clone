@@ -338,7 +338,10 @@ index.html:
 - Must contain exactly: const API_URL = "{{API_BASE}}"; — do NOT replace {{API_BASE}} yourself
 - Every fetch to the backend must include /api/ in the path: fetch(API_URL + '/api/todos') not fetch(API_URL + '/todos')
 - Use html\`...\` tagged templates (htm syntax), not JSX
-- Mount with: render(html\`<\${App} />\`, root)
+- Mount with exactly these two lines, no backslashes:
+    const root = document.getElementById('root');
+    render(html\`<\${App} />\`, root);
+  Do NOT add escape slashes before backticks or \${...} placeholders in the final output.
 - Use camelCase event handlers: onClick, onInput, onChange, onSubmit
 - Match response shapes: if worker.js returns { todos: results }, use data.todos in the frontend — never call .map() directly on a wrapped response object
 - Child components must receive callbacks as props (e.g. onDelete) — never reference parent-scoped functions directly
