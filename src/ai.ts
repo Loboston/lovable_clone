@@ -226,61 +226,268 @@ Output exactly three blocks:
 ...
 No other text.`;
 
-export async function generateCode(
+// ─── Claude Agent ────────────────────────────────────────────────────────────
+
+const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
+const AGENT_MODEL = "claude-haiku-4-5-20251001";
+
+type AnthropicContentBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, string> };
+
+interface AnthropicResponse {
+  content: AnthropicContentBlock[];
+  stop_reason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence";
+}
+
+type ToolResultBlock = {
+  type: "tool_result";
+  tool_use_id: string;
+  content: string;
+};
+
+type AgentMessage =
+  | { role: "user"; content: string | ToolResultBlock[] }
+  | { role: "assistant"; content: AnthropicContentBlock[] };
+
+export type DeployFn = (
+  workerJs: string,
+  indexHtml: string,
+  migrationSql: string
+) => Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }>;
+
+const AGENT_TOOLS = [
+  {
+    name: "read_from_r2",
+    description:
+      "Read an existing generated file from R2 storage. Call this for all three files first to check what was previously generated before making changes.",
+    input_schema: {
+      type: "object",
+      properties: {
+        filename: {
+          type: "string",
+          enum: ["worker.js", "index.html", "migration.sql"],
+          description: "The filename to read",
+        },
+      },
+      required: ["filename"],
+    },
+  },
+  {
+    name: "write_to_r2",
+    description:
+      "Write a generated file to R2 storage. Call this for each of the three files after generating them.",
+    input_schema: {
+      type: "object",
+      properties: {
+        filename: {
+          type: "string",
+          enum: ["worker.js", "index.html", "migration.sql"],
+          description: "The filename to write",
+        },
+        content: {
+          type: "string",
+          description: "The complete file content",
+        },
+      },
+      required: ["filename", "content"],
+    },
+  },
+  {
+    name: "deploy_from_r2",
+    description:
+      "Deploy the app using the three files stored in R2. Only call this after writing all three files to R2.",
+    input_schema: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+];
+
+const AGENT_SYSTEM = `You are a code generation agent for a Cloudflare app builder platform.
+
+Your job: Generate or update worker.js, index.html, and migration.sql for a user's app, then deploy them.
+
+PROCESS (follow in order):
+1. Call read_from_r2 for each of the three files to check what was previously generated
+2. Generate new or patched versions based on the plan, conversation, and any existing files
+3. Call write_to_r2 for each file
+4. Verify your files meet all requirements below
+5. Call deploy_from_r2
+
+FILE REQUIREMENTS:
+
+worker.js:
+- Full ES module. Must export default { async fetch(request, env) { ... } }
+- Route /api/* to API logic, otherwise return env.ASSETS.fetch(request) as the final fallback
+- Use env.DB (D1), env.JWT_SECRET, env.STORAGE (R2) as needed
+- Every /api/* response must use Response.json() — never plain text responses
+- Wrap request.json() in try/catch, return Response.json({ error: 'Invalid JSON' }, { status: 400 }) on failure
+- No npm imports — use crypto.subtle inline for password hashing and JWT (HMAC-SHA256)
+
+index.html:
+- Complete standalone HTML file using Preact + htm from esm.sh + Tailwind CDN
+- Must use EXACTLY these imports — do not change them:
+    import { h, render } from 'https://esm.sh/preact@10';
+    import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';
+    import htm from 'https://esm.sh/htm@3';
+    const html = htm.bind(h);
+- Do NOT import { html } from preact — preact does not export html. Only h and render.
+- Do NOT use window.preact.useState — always use the imported useState directly.
+- Must contain exactly: const API_URL = "{{API_BASE}}"; — do NOT replace {{API_BASE}} yourself
+- Every fetch to the backend must include /api/ in the path: fetch(API_URL + '/api/todos') not fetch(API_URL + '/todos')
+- Use html\`...\` tagged templates (htm syntax), not JSX
+- Mount with: render(html\`<\${App} />\`, root)
+- Use camelCase event handlers: onClick, onInput, onChange, onSubmit
+- Match response shapes: if worker.js returns { todos: results }, use data.todos in the frontend — never call .map() directly on a wrapped response object
+- Child components must receive callbacks as props (e.g. onDelete) — never reference parent-scoped functions directly
+
+migration.sql:
+- CREATE TABLE IF NOT EXISTS for each table
+- SQLite types only: TEXT, INTEGER, REAL, BLOB — no SERIAL, no AUTO_INCREMENT
+- Add indexes where useful
+
+SELF-CHECK before calling deploy_from_r2:
+- Every fetch() in index.html uses API_URL + '/api/...' (not API_URL + '/todos' etc.)
+- worker.js returns Response.json() for every /api/* route including error cases
+- worker.js has env.ASSETS.fetch(request) as the final fallback for non-API routes
+- index.html contains the exact string: const API_URL = "{{API_BASE}}";
+- migration.sql has no Postgres-only syntax
+- Response shapes match between worker.js and index.html`;
+
+export async function runBuildAgent(
   env: Env,
+  projectId: string,
   plan: AppPlan,
-  conversation: { role: string; content: string }[]
-): Promise<{ workerJs: string; indexHtml: string; migrationSql: string }> {
+  conversation: { role: string; content: string }[],
+  deployFn: DeployFn
+): Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }> {
+  const apiKey = env.ANTHROPIC_API_KEY;
+  if (!apiKey || apiKey === "your-anthropic-api-key-here") {
+    throw new Error("ANTHROPIC_API_KEY is not set — add it to wrangler.toml or run: wrangler secret put ANTHROPIC_API_KEY");
+  }
+
+  const prefix = `projects/${projectId}/`;
+  let deployResult: { deployedUrl: string; d1DatabaseId: string; workerName: string } | null = null;
+
+  async function executeTool(name: string, input: Record<string, string>): Promise<string> {
+    if (name === "read_from_r2") {
+      const obj = await env.CODE_BUCKET.get(`${prefix}${input.filename}`);
+      if (!obj) {
+        return `${input.filename} does not exist yet — this is a first deploy. Generate it fresh.`;
+      }
+      return await obj.text();
+    }
+
+    if (name === "write_to_r2") {
+      if (!input.filename || !input.content) {
+        return "Error: filename and content are required";
+      }
+      await env.CODE_BUCKET.put(`${prefix}${input.filename}`, input.content);
+      return `${input.filename} written to R2 successfully`;
+    }
+
+    if (name === "deploy_from_r2") {
+      const [workerObj, htmlObj, sqlObj] = await Promise.all([
+        env.CODE_BUCKET.get(`${prefix}worker.js`),
+        env.CODE_BUCKET.get(`${prefix}index.html`),
+        env.CODE_BUCKET.get(`${prefix}migration.sql`),
+      ]);
+
+      const missing = [
+        !workerObj && "worker.js",
+        !htmlObj && "index.html",
+        !sqlObj && "migration.sql",
+      ].filter(Boolean);
+
+      if (missing.length > 0) {
+        return `Error: missing files in R2: ${missing.join(", ")}. Write all three files before deploying.`;
+      }
+
+      const [workerJs, indexHtml, migrationSql] = await Promise.all([
+        workerObj!.text(),
+        htmlObj!.text(),
+        sqlObj!.text(),
+      ]);
+
+      try {
+        deployResult = await deployFn(workerJs, indexHtml, migrationSql);
+        return `Deployed successfully. URL: ${deployResult.deployedUrl}`;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return `Deploy failed: ${msg}. Fix the issue in the relevant file and try again.`;
+      }
+    }
+
+    return `Unknown tool: ${name}`;
+  }
+
   const planStr = JSON.stringify(plan, null, 2);
   const convStr = conversation
     .slice(-10)
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
 
-  const messages = [
-    { role: "system" as const, content: CODE_SYSTEM },
+  const messages: AgentMessage[] = [
     {
-      role: "user" as const,
-      content: `Plan:\n${planStr}\n\nRecent conversation:\n${convStr}\n\nGenerate the three files now.`,
+      role: "user",
+      content: `Plan:\n${planStr}\n\nRecent conversation:\n${convStr}\n\nProject ID: ${projectId}\n\nStart by reading the existing files from R2, then generate or update all three files and deploy.`,
     },
   ];
 
-  const out = await env.AI.run(MODEL as never, {
-    messages,
-    stream: false,
-  } as never);
+  const MAX_ITERATIONS = 20;
 
-  const text = getTextFromAiResponse(out);
-  const fileRegex = /---FILE:(\S+)---\s*([\s\S]*?)(?=---FILE:\S+---|$)/g;
-  const files: Record<string, string> = {};
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    const res = await fetch(ANTHROPIC_API, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: AGENT_MODEL,
+        max_tokens: 8192,
+        system: AGENT_SYSTEM,
+        tools: AGENT_TOOLS,
+        messages,
+      }),
+    });
 
-  let m: RegExpExecArray | null;
-  while ((m = fileRegex.exec(text)) !== null) {
-    const name = m[1].trim();
-    const content = m[2].trim();
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Anthropic API error ${res.status}: ${errText}`);
+    }
 
-    if (name === "worker.js") files.workerJs = content;
-    else if (name === "index.html") files.indexHtml = content;
-    else if (name === "migration.sql") files.migrationSql = content;
+    const data = (await res.json()) as AnthropicResponse;
+    messages.push({ role: "assistant", content: data.content });
+
+    if (data.stop_reason === "end_turn") {
+      if (!deployResult) {
+        throw new Error("Agent finished without deploying. Check that deploy_from_r2 was called.");
+      }
+      return deployResult;
+    }
+
+    if (data.stop_reason === "tool_use") {
+      const toolResults: ToolResultBlock[] = [];
+
+      for (const block of data.content) {
+        if (block.type === "tool_use") {
+          const result = await executeTool(block.name, block.input);
+          toolResults.push({ type: "tool_result", tool_use_id: block.id, content: result });
+        }
+      }
+
+      messages.push({ role: "user", content: toolResults });
+      continue;
+    }
+
+    if (data.stop_reason === "max_tokens") {
+      throw new Error("Agent exceeded token limit. Try a simpler app description.");
+    }
   }
 
-  if (!files.workerJs || !files.indexHtml || !files.migrationSql) {
-    throw new Error("AI did not return all three files. Got: " + Object.keys(files).join(", "));
-  }
-
-  const workerValidationErrors = validateWorkerJs(files.workerJs);
-  if (workerValidationErrors.length > 0) {
-    throw new Error("worker.js validation failed: " + workerValidationErrors.join("; "));
-  }
-
-  const indexValidationErrors = validateIndexHtml(files.indexHtml);
-  if (indexValidationErrors.length > 0) {
-    throw new Error("index.html validation failed: " + indexValidationErrors.join("; "));
-  }
-
-  return {
-    workerJs: files.workerJs,
-    indexHtml: files.indexHtml,
-    migrationSql: files.migrationSql,
-  };
+  throw new Error("Agent exceeded maximum iterations without completing the build.");
 }

@@ -10,6 +10,7 @@ export interface Env {
   CLOUDFLARE_ACCOUNT_ID: string;
   CLOUDFLARE_API_TOKEN: string;
   PLATFORM_JWT_SECRET: string;
+  ANTHROPIC_API_KEY: string;
 }
 
 export interface PlanPage {

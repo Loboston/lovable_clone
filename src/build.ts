@@ -1,5 +1,6 @@
 import type { Env } from "./types";
-import { generatePlan, generateCode } from "./ai";
+import { generatePlan, runBuildAgent } from "./ai";
+import type { DeployFn } from "./ai";
 import {
   getOrCreateD1Database,
   runD1Query,
@@ -51,40 +52,27 @@ function wrapGeneratedWorkerForErrors(workerJs: string): string {
   );
 }
 
-export async function buildProject(
+/**
+ * Processes raw agent-generated files and deploys them to Cloudflare.
+ * Called by the agent's deploy_from_r2 tool via the deployFn callback.
+ */
+async function deployFiles(
   env: Env,
   projectId: string,
-  projectName: string,
+  workerJs: string,
+  indexHtml: string,
+  migrationSql: string,
   baseUrl: string
 ): Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }> {
   const accountId = env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = env.CLOUDFLARE_API_TOKEN;
-  if (!accountId || !apiToken) {
-    throw new Error("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN must be set");
-  }
 
-  const history = await env.DB.prepare(
-    "SELECT role, content FROM chat_messages WHERE project_id = ? ORDER BY created_at ASC"
-  )
-    .bind(projectId)
-    .all();
-
-  const conversation = (history.results ?? []) as { role: string; content: string }[];
-  const plan = await generatePlan(env, conversation);
-  const { workerJs, indexHtml: rawIndexHtml, migrationSql } = await generateCode(env, plan, conversation);
+  // Wrap worker with error handler and inject API base path
   const workerJsWrapped = wrapGeneratedWorkerForErrors(workerJs);
-
-  // Replace {{API_BASE}} so the app's fetch() calls hit the same-origin API under /apps/:projectId/
-  // We intentionally do NOT include '/api' here, because generated code commonly uses `${API_URL}/api/...`.
-  // This keeps the final path as /apps/:projectId/api/... instead of /apps/:projectId/api//api/...
   const apiBase = `/apps/${projectId}`;
-  const indexHtml = rawIndexHtml.replace(/\{\{API_BASE\}\}/g, apiBase);
+  const indexHtmlProcessed = indexHtml.replace(/\{\{API_BASE\}\}/g, apiBase);
 
-  const prefix = `projects/${projectId}/`;
-  await env.CODE_BUCKET.put(`${prefix}worker.js`, workerJsWrapped);
-  await env.CODE_BUCKET.put(`${prefix}index.html`, indexHtml);
-  await env.CODE_BUCKET.put(`${prefix}migration.sql`, migrationSql);
-
+  // Reuse existing D1 database if already provisioned for this project
   const dbName = `app-${projectId}`;
   const existingRow = await env.DB.prepare(
     "SELECT d1_database_id FROM projects WHERE id = ?"
@@ -103,9 +91,11 @@ export async function buildProject(
     .map((s) => s.trim())
     .filter(Boolean)
     .filter((s) => !isEmptyOrNoQuery(s));
+
   for (const sql of statements) {
     await runD1Query(accountId, apiToken, d1DatabaseId, sql + ";");
   }
+
   const migrationTrimmed = migrationSql.trim();
   if (statements.length === 0 && migrationTrimmed && !isEmptyOrNoQuery(migrationTrimmed)) {
     const sql = migrationTrimmed.endsWith(";") ? migrationTrimmed : migrationTrimmed + ";";
@@ -121,7 +111,7 @@ export async function buildProject(
     namespace: NAMESPACE,
     scriptName: workerName,
     scriptContent: workerJsWrapped,
-    indexHtml,
+    indexHtml: indexHtmlProcessed,
     d1DatabaseId,
     r2BucketName: R2_BUCKET_NAME,
     jwtSecret,
@@ -129,4 +119,36 @@ export async function buildProject(
 
   const deployedUrl = `${baseUrl}/apps/${projectId}/`;
   return { deployedUrl, d1DatabaseId, workerName };
+}
+
+export async function buildProject(
+  env: Env,
+  projectId: string,
+  projectName: string,
+  baseUrl: string
+): Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }> {
+  const accountId = env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = env.CLOUDFLARE_API_TOKEN;
+  if (!accountId || !apiToken) {
+    throw new Error("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN must be set");
+  }
+
+  // Fetch full chat history to give the agent context
+  const history = await env.DB.prepare(
+    "SELECT role, content FROM chat_messages WHERE project_id = ? ORDER BY created_at ASC"
+  )
+    .bind(projectId)
+    .all();
+
+  const conversation = (history.results ?? []) as { role: string; content: string }[];
+
+  // Generate the plan using Workers AI (cheap, works well for structured JSON output)
+  const plan = await generatePlan(env, conversation);
+
+  // Run the Claude agent — reads existing files from R2, generates/patches all three,
+  // writes them back to R2, then deploys via deployFiles
+  const deployFn: DeployFn = (workerJs, indexHtml, migrationSql) =>
+    deployFiles(env, projectId, workerJs, indexHtml, migrationSql, baseUrl);
+
+  return await runBuildAgent(env, projectId, plan, conversation, deployFn);
 }
