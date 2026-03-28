@@ -38,12 +38,19 @@ app.post("/", async (c) => {
     .bind(projectId)
     .all();
 
-  const stream = await streamChat(c.env, message, history.results as { role: string; content: string }[]);
+  const { message: assistantMessage, build } = await streamChat(
+    c.env,
+    message,
+    history.results as { role: string; content: string }[]
+  );
 
-  c.header("Content-Type", "text/event-stream");
-  c.header("Cache-Control", "no-cache");
-  c.header("Connection", "keep-alive");
-  return c.body(stream);
+  await c.env.DB.prepare(
+    "INSERT INTO chat_messages (project_id, role, content) VALUES (?, ?, ?)"
+  )
+    .bind(projectId, "assistant", assistantMessage)
+    .run();
+
+  return c.json({ message: assistantMessage, build });
 });
 
 app.get("/:projectId/history", async (c) => {

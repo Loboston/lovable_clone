@@ -1,4 +1,6 @@
 import type { Env, AppPlan } from "./types";
+export type { DeployFn } from "./agent";
+export { runBuildAgent } from "./agent";
 
 const MODEL = "@cf/zai-org/glm-4.7-flash";
 
@@ -6,15 +8,19 @@ const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
 const AGENT_MODEL = "claude-haiku-4-5-20251001";
 
 const CHAT_SYSTEM =
-  "You are a friendly assistant for an app builder. The user describes the app they want. " +
-  "You must ONLY give a short acknowledgment (1–2 sentences). Examples: 'Got it, I've noted you want a todo app. Click Deploy when you're ready to build it.' or 'Noted! Add more details if you like, or click Deploy to generate your app.' " +
-  "Do NOT output any code, file contents, HTML, markdown code blocks, or images. Do NOT start with 'Sure!' or 'Here is...' and then paste code. Just acknowledge briefly.";
+  "You are a friendly assistant for an app builder. Always respond with ONLY a JSON object — no other text, no markdown, no code fences.\n\n" +
+  'Shape: {"message": "...", "build": true|false}\n\n' +
+  'Set "build": true if the user\'s request is specific enough to build an app right now (has a clear purpose and at least one implied feature). ' +
+  'Set "build": false if you need more information to build something useful.\n\n' +
+  'If build is true: "message" should confirm what you\'re about to build in 1–2 sentences (e.g. "Got it! Building a todo app with login and task tracking now...").\n' +
+  'If build is false: "message" should ask one short clarifying question.\n\n' +
+  "Never wrap the JSON in markdown code fences. Never output code, HTML, file contents, or anything other than the raw JSON object.";
 
 export async function streamChat(
   env: Env,
   userMessage: string,
   history: { role: string; content: string }[]
-): Promise<ReadableStream<Uint8Array>> {
+): Promise<{ message: string; build: boolean }> {
   const messages = [
     ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
     { role: "user" as const, content: userMessage },
@@ -43,15 +49,13 @@ export async function streamChat(
   const data = await res.json() as { content: Array<{ type: string; text: string }> };
   const text = data.content.find((b) => b.type === "text")?.text ?? "";
 
-  const encoder = new TextEncoder();
-  const ssePayload = `data: ${JSON.stringify({ choices: [{ text }] })}\n\ndata: [DONE]\n\n`;
-
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(encoder.encode(ssePayload));
-      controller.close();
-    },
-  });
+  try {
+    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const parsed = JSON.parse(cleaned) as { message?: string; build?: boolean };
+    return { message: parsed.message ?? text, build: !!parsed.build };
+  } catch {
+    return { message: text, build: false };
+  }
 }
 
 export async function saveAssistantMessage(
@@ -242,285 +246,3 @@ Output exactly three blocks:
 ...
 No other text.`;
 
-// ─── Claude Agent ────────────────────────────────────────────────────────────
-
-type AnthropicContentBlock =
-  | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, string> };
-
-interface AnthropicResponse {
-  content: AnthropicContentBlock[];
-  stop_reason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence";
-}
-
-type ToolResultBlock = {
-  type: "tool_result";
-  tool_use_id: string;
-  content: string;
-};
-
-type AgentMessage =
-  | { role: "user"; content: string | ToolResultBlock[] }
-  | { role: "assistant"; content: AnthropicContentBlock[] };
-
-export type DeployFn = (
-  workerJs: string,
-  indexHtml: string,
-  migrationSql: string
-) => Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }>;
-
-const AGENT_TOOLS = [
-  {
-    name: "read_from_r2",
-    description:
-      "Read an existing generated file from R2 storage. Call this for all three files first to check what was previously generated before making changes.",
-    input_schema: {
-      type: "object",
-      properties: {
-        filename: {
-          type: "string",
-          enum: ["worker.js", "index.html", "migration.sql"],
-          description: "The filename to read",
-        },
-      },
-      required: ["filename"],
-    },
-  },
-  {
-    name: "write_to_r2",
-    description:
-      "Write a generated file to R2 storage. Call this for each of the three files after generating them.",
-    input_schema: {
-      type: "object",
-      properties: {
-        filename: {
-          type: "string",
-          enum: ["worker.js", "index.html", "migration.sql"],
-          description: "The filename to write",
-        },
-        content: {
-          type: "string",
-          description: "The complete file content",
-        },
-      },
-      required: ["filename", "content"],
-    },
-  },
-  {
-    name: "deploy_from_r2",
-    description:
-      "Deploy the app using the three files stored in R2. Only call this after writing all three files to R2.",
-    input_schema: {
-      type: "object",
-      properties: {},
-      required: [],
-    },
-  },
-];
-
-const AGENT_SYSTEM = `You are a code generation agent for a Cloudflare app builder platform.
-
-Your job: Generate or update worker.js, index.html, and migration.sql for a user's app, then deploy them.
-
-FIRST DEPLOY vs UPDATE DEPLOY:
-- If you receive a Plan in the user message: this is a FIRST DEPLOY. Generate all three files fresh from the plan. Ignore existing R2 files (they don't exist yet).
-- If you receive NO plan ("No plan — this is an update deploy"): this is an UPDATE DEPLOY.
-  - Read all three existing files from R2 first before making any decisions.
-  - Determine intent from the last user message:
-    * PATCH mode (default): If the request is a small change — color, style, wording, adding one field, fixing a bug — only modify the specific parts that need to change. Preserve ALL existing routes, DB schema, auth logic, components, and page structure.
-    * REWRITE mode: Only do a full rewrite if the user explicitly says "start over", "rebuild from scratch", or asks for a completely different type of app.
-  - In PATCH mode: never add login/auth screens, new pages, or new DB tables unless explicitly asked. Never rename or remove existing DB tables or API routes.
-
-PROCESS (follow in order):
-1. Call read_from_r2 for each of the three files to check what was previously generated
-2. Generate new or patched versions based on the plan/intent, conversation, and any existing files
-3. Call write_to_r2 for each file
-4. Verify your files meet all requirements below
-5. Call deploy_from_r2
-
-FILE REQUIREMENTS:
-
-worker.js:
-- Full ES module. Must export default { async fetch(request, env) { ... } }
-- Route /api/* to API logic, otherwise return env.ASSETS.fetch(request) as the final fallback
-- Use env.DB (D1), env.JWT_SECRET, env.STORAGE (R2) as needed
-- Every /api/* response must use Response.json() — never plain text responses
-- Wrap request.json() in try/catch, return Response.json({ error: 'Invalid JSON' }, { status: 400 }) on failure
-- No npm imports — use crypto.subtle inline for password hashing and JWT (HMAC-SHA256)
-
-index.html:
-- Complete standalone HTML file using Preact + htm from esm.sh + Tailwind CDN
-- Must use EXACTLY these imports — do not change them:
-    import { h, render } from 'https://esm.sh/preact@10';
-    import { useState, useEffect } from 'https://esm.sh/preact@10/hooks';
-    import htm from 'https://esm.sh/htm@3';
-    const html = htm.bind(h);
-- Do NOT import { html } from preact — preact does not export html. Only h and render.
-- Do NOT use window.preact.useState — always use the imported useState directly.
-- Must contain exactly: const API_URL = "{{API_BASE}}"; — do NOT replace {{API_BASE}} yourself
-- Every fetch to the backend must include /api/ in the path: fetch(API_URL + '/api/todos') not fetch(API_URL + '/todos')
-- Use html\`...\` tagged templates (htm syntax), not JSX
-- Mount with exactly these two lines, no backslashes:
-    const root = document.getElementById('root');
-    render(html\`<\${App} />\`, root);
-  Do NOT add escape slashes before backticks or \${...} placeholders in the final output.
-- Use camelCase event handlers: onClick, onInput, onChange, onSubmit
-- Match response shapes: if worker.js returns { todos: results }, use data.todos in the frontend — never call .map() directly on a wrapped response object
-- Child components must receive callbacks as props (e.g. onDelete) — never reference parent-scoped functions directly
-
-migration.sql:
-- CREATE TABLE IF NOT EXISTS for each table
-- SQLite types only: TEXT, INTEGER, REAL, BLOB — no SERIAL, no AUTO_INCREMENT
-- Add indexes where useful
-
-SELF-CHECK before calling deploy_from_r2:
-- Every fetch() in index.html uses API_URL + '/api/...' (not API_URL + '/todos' etc.)
-- worker.js returns Response.json() for every /api/* route including error cases
-- worker.js has env.ASSETS.fetch(request) as the final fallback for non-API routes
-- index.html contains the exact string: const API_URL = "{{API_BASE}}";
-- migration.sql has no Postgres-only syntax
-- Response shapes match between worker.js and index.html`;
-
-export async function runBuildAgent(
-  env: Env,
-  projectId: string,
-  plan: AppPlan | null,
-  conversation: { role: string; content: string }[],
-  isFirstDeploy: boolean,
-  deployFn: DeployFn
-): Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }> {
-  const apiKey = env.ANTHROPIC_API_KEY;
-  if (!apiKey || apiKey === "your-anthropic-api-key-here") {
-    throw new Error("ANTHROPIC_API_KEY is not set — add it to wrangler.toml or run: wrangler secret put ANTHROPIC_API_KEY");
-  }
-
-  const prefix = `projects/${projectId}/`;
-  let deployResult: { deployedUrl: string; d1DatabaseId: string; workerName: string } | null = null;
-
-  async function executeTool(name: string, input: Record<string, string>): Promise<string> {
-    if (name === "read_from_r2") {
-      const obj = await env.CODE_BUCKET.get(`${prefix}${input.filename}`);
-      if (!obj) {
-        return `${input.filename} does not exist yet — this is a first deploy. Generate it fresh.`;
-      }
-      return await obj.text();
-    }
-
-    if (name === "write_to_r2") {
-      if (!input.filename || !input.content) {
-        return "Error: filename and content are required";
-      }
-      await env.CODE_BUCKET.put(`${prefix}${input.filename}`, input.content);
-      return `${input.filename} written to R2 successfully`;
-    }
-
-    if (name === "deploy_from_r2") {
-      const [workerObj, htmlObj, sqlObj] = await Promise.all([
-        env.CODE_BUCKET.get(`${prefix}worker.js`),
-        env.CODE_BUCKET.get(`${prefix}index.html`),
-        env.CODE_BUCKET.get(`${prefix}migration.sql`),
-      ]);
-
-      const missing = [
-        !workerObj && "worker.js",
-        !htmlObj && "index.html",
-        !sqlObj && "migration.sql",
-      ].filter(Boolean);
-
-      if (missing.length > 0) {
-        return `Error: missing files in R2: ${missing.join(", ")}. Write all three files before deploying.`;
-      }
-
-      const [workerJs, indexHtml, migrationSql] = await Promise.all([
-        workerObj!.text(),
-        htmlObj!.text(),
-        sqlObj!.text(),
-      ]);
-
-      try {
-        deployResult = await deployFn(workerJs, indexHtml, migrationSql);
-        return `Deployed successfully. URL: ${deployResult.deployedUrl}`;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return `Deploy failed: ${msg}. Fix the issue in the relevant file and try again.`;
-      }
-    }
-
-    return `Unknown tool: ${name}`;
-  }
-
-  const convStr = conversation
-    .slice(-10)
-    .map((m) => `${m.role}: ${m.content}`)
-    .join("\n");
-
-  const planSection = plan
-    ? `Plan:\n${JSON.stringify(plan, null, 2)}`
-    : `No plan — this is an update deploy. Read the existing files from R2 first, then apply only the changes the user requested.`;
-
-  const instruction = isFirstDeploy
-    ? "Generate all three files fresh from the plan above and deploy."
-    : "Read the existing files from R2, patch only what the user asked for, then deploy.";
-
-  const messages: AgentMessage[] = [
-    {
-      role: "user",
-      content: `${planSection}\n\nRecent conversation:\n${convStr}\n\nProject ID: ${projectId}\n\n${instruction}`,
-    },
-  ];
-
-  const MAX_ITERATIONS = 20;
-
-  for (let i = 0; i < MAX_ITERATIONS; i++) {
-    const res = await fetch(ANTHROPIC_API, {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: AGENT_MODEL,
-        max_tokens: 8192,
-        system: AGENT_SYSTEM,
-        tools: AGENT_TOOLS,
-        messages,
-      }),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Anthropic API error ${res.status}: ${errText}`);
-    }
-
-    const data = (await res.json()) as AnthropicResponse;
-    messages.push({ role: "assistant", content: data.content });
-
-    if (data.stop_reason === "end_turn") {
-      if (!deployResult) {
-        throw new Error("Agent finished without deploying. Check that deploy_from_r2 was called.");
-      }
-      return deployResult;
-    }
-
-    if (data.stop_reason === "tool_use") {
-      const toolResults: ToolResultBlock[] = [];
-
-      for (const block of data.content) {
-        if (block.type === "tool_use") {
-          const result = await executeTool(block.name, block.input);
-          toolResults.push({ type: "tool_result", tool_use_id: block.id, content: result });
-        }
-      }
-
-      messages.push({ role: "user", content: toolResults });
-      continue;
-    }
-
-    if (data.stop_reason === "max_tokens") {
-      throw new Error("Agent exceeded token limit. Try a simpler app description.");
-    }
-  }
-
-  throw new Error("Agent exceeded maximum iterations without completing the build.");
-}

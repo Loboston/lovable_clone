@@ -107,10 +107,9 @@ function render() {
           <div class="flex items-center gap-4">
             <button id="backBtn" class="text-slate-400 hover:text-white">← Back</button>
             <h1 class="text-xl font-bold">\${proj.name}</h1>
-            <span class="text-sm text-slate-400">\${proj.status || 'draft'}</span>
-            \${proj.deployed_url ? \`<a href="\${proj.deployed_url}" target="_blank" class="text-sm text-blue-400">Open app</a>\` : ''}
+            <span id="projectStatus" class="text-sm text-slate-400">\${proj.status || 'draft'}</span>
+            \${proj.deployed_url ? \`<a id="openAppLink" href="\${proj.deployed_url}" target="_blank" class="text-sm text-blue-400">Open app</a>\` : ''}
           </div>
-          <button id="deployBtn" class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-sm">Deploy</button>
         </header>
         <div class="flex flex-1 overflow-hidden">
           <div class="w-1/2 flex flex-col border-r border-slate-700">
@@ -128,20 +127,56 @@ function render() {
       </div>
     \`;
     document.getElementById('backBtn').onclick = () => { currentProjectId = null; render(); };
-    document.getElementById('deployBtn').onclick = async () => {
-      const btn = document.getElementById('deployBtn');
-      btn.disabled = true;
-      btn.textContent = 'Building...';
+
+    async function triggerBuild(ul) {
+      const statusEl = document.getElementById('projectStatus');
+      if (statusEl) statusEl.textContent = 'building...';
+      const buildingLi = document.createElement('li');
+      buildingLi.className = 'text-left text-slate-400 italic';
+      buildingLi.textContent = 'Building your app... this takes about 30 seconds.';
+      ul.appendChild(buildingLi);
+      ul.scrollTop = ul.scrollHeight;
       try {
         const r = await api(\`/api/projects/\${currentProjectId}/build\`, { method: 'POST' });
         const data = await r.json();
+        buildingLi.remove();
         if (r.ok) {
           const p = projects.find(x => x.id === currentProjectId);
           if (p) { p.status = 'deployed'; p.deployed_url = data.deployed_url; }
-          render();
-        } else alert(data.error || 'Build failed');
-      } finally { btn.disabled = false; btn.textContent = 'Deploy'; }
-    };
+          if (statusEl) statusEl.textContent = 'deployed';
+          const header = document.querySelector('header .flex.items-center.gap-4');
+          if (header && !document.getElementById('openAppLink')) {
+            const link = document.createElement('a');
+            link.id = 'openAppLink';
+            link.href = data.deployed_url;
+            link.target = '_blank';
+            link.className = 'text-sm text-blue-400';
+            link.textContent = 'Open app';
+            header.appendChild(link);
+          }
+          const doneLi = document.createElement('li');
+          doneLi.className = 'text-left';
+          doneLi.innerHTML = \`App deployed! <a href="\${data.deployed_url}" target="_blank" class="text-blue-400 underline">Open it here</a>\`;
+          ul.appendChild(doneLi);
+          const frame = document.getElementById('previewFrame');
+          if (frame) frame.src = data.deployed_url;
+        } else {
+          if (statusEl) statusEl.textContent = 'error';
+          const errLi = document.createElement('li');
+          errLi.className = 'text-left text-red-400';
+          errLi.textContent = 'Build failed: ' + (data.error || 'Unknown error');
+          ul.appendChild(errLi);
+        }
+      } catch (err) {
+        buildingLi.remove();
+        if (statusEl) statusEl.textContent = 'error';
+        const errLi = document.createElement('li');
+        errLi.className = 'text-left text-red-400';
+        errLi.textContent = 'Build failed: ' + err.message;
+        ul.appendChild(errLi);
+      }
+      ul.scrollTop = ul.scrollHeight;
+    }
     (async () => {
       const r = await api(\`/api/chat/\${currentProjectId}/history\`);
       const data = await r.json();
@@ -164,47 +199,23 @@ function render() {
       userLi.textContent = text;
       ul.appendChild(userLi);
       chatInput.value = '';
-      const res = await fetch(API + '/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
-        body: JSON.stringify({ project_id: currentProjectId, message: text }),
-      });
-      if (!res.ok) return;
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      const assistantLi = document.createElement('li');
-      assistantLi.className = 'text-left';
-      ul.appendChild(assistantLi);
-      let full = '';
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          const parts = line.split(' data: ');
-          for (let i = 0; i < parts.length; i++) {
-            let payload = parts[i].trim();
-            if (payload.startsWith('data: ')) payload = payload.slice(6).trim();
-            if (!payload || payload === '[DONE]') continue;
-            try {
-              const obj = JSON.parse(payload);
-              const text = obj.choices?.[0]?.text;
-              if (typeof text === 'string') full += text;
-            } catch (_) {}
-          }
+      sendBtn.disabled = true;
+      ul.scrollTop = ul.scrollHeight;
+      try {
+        const res = await api('/api/chat', { method: 'POST', body: { project_id: currentProjectId, message: text } });
+        const data = await res.json();
+        if (!res.ok) return;
+        const assistantLi = document.createElement('li');
+        assistantLi.className = 'text-left';
+        assistantLi.textContent = data.message;
+        ul.appendChild(assistantLi);
+        ul.scrollTop = ul.scrollHeight;
+        if (data.build) {
+          await triggerBuild(ul);
         }
-        const display = full.startsWith('\`\`\`') || full.includes('---FILE:') || full.trim().startsWith('<!')
-          ? "Noted! Click Deploy when you're ready to build your app."
-          : full;
-        assistantLi.textContent = display;
+      } finally {
+        sendBtn.disabled = false;
       }
-      const toSave = full.startsWith('\`\`\`') || full.includes('---FILE:') || full.trim().startsWith('<!')
-        ? "Noted! Click Deploy when you're ready to build your app."
-        : full;
-      await api('/api/chat/save-assistant', { method: 'POST', body: { project_id: currentProjectId, content: toSave } });
     };
     return;
   }
