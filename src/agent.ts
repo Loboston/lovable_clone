@@ -5,7 +5,17 @@
  * Each iteration: call Claude → if tool_use, execute tools and feed results back → repeat until end_turn.
  */
 
-import type { Env, AppPlan } from "./types";
+import type { AppPlan } from "./types";
+
+/**
+ * Abstracts how the agent reads and writes the three generated files.
+ * The web app uses Worker bindings (R2Bucket); the CLI uses the Cloudflare REST API.
+ * Implementations are responsible for namespacing by projectId.
+ */
+export interface StorageAdapter {
+  readFile(filename: string): Promise<string | null>;
+  writeFile(filename: string, content: string): Promise<void>;
+}
 
 const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
 const AGENT_MODEL = "claude-haiku-4-5-20251001";
@@ -254,21 +264,20 @@ function buildInitialMessage(
 }
 
 export async function runBuildAgent(
-  env: Env,
+  apiKey: string,
+  storage: StorageAdapter,
+  deployFn: DeployFn,
   projectId: string,
   plan: AppPlan | null,
   conversation: { role: string; content: string }[],
-  isFirstDeploy: boolean,
-  deployFn: DeployFn
+  isFirstDeploy: boolean
 ): Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }> {
-  const apiKey = env.ANTHROPIC_API_KEY;
   if (!apiKey || apiKey === "your-anthropic-api-key-here") {
     throw new Error(
       "ANTHROPIC_API_KEY is not set — add it to wrangler.toml or run: wrangler secret put ANTHROPIC_API_KEY"
     );
   }
 
-  const prefix = `projects/${projectId}/`;
   let deployResult: { deployedUrl: string; d1DatabaseId: string; workerName: string } | null =
     null;
 
@@ -276,33 +285,33 @@ export async function runBuildAgent(
 
   async function executeTool(name: string, input: Record<string, string>): Promise<string> {
     if (name === "read_from_r2") {
-      const obj = await env.CODE_BUCKET.get(`${prefix}${input.filename}`);
-      if (!obj) {
+      const content = await storage.readFile(input.filename);
+      if (content === null) {
         return `${input.filename} does not exist yet — generate it fresh.`;
       }
-      return obj.text();
+      return content;
     }
 
     if (name === "write_to_r2") {
       if (!input.filename || !input.content) {
         return "Error: filename and content are required";
       }
-      await env.CODE_BUCKET.put(`${prefix}${input.filename}`, input.content);
+      await storage.writeFile(input.filename, input.content);
       return `${input.filename} written successfully.`;
     }
 
     if (name === "deploy_from_r2") {
-      const [workerObj, htmlObj, sqlObj] = await Promise.all([
-        env.CODE_BUCKET.get(`${prefix}worker.js`),
-        env.CODE_BUCKET.get(`${prefix}index.html`),
-        env.CODE_BUCKET.get(`${prefix}migration.sql`),
+      const [workerJs, indexHtml, migrationSql] = await Promise.all([
+        storage.readFile("worker.js"),
+        storage.readFile("index.html"),
+        storage.readFile("migration.sql"),
       ]);
 
       const missing = (
         [
-          !workerObj && "worker.js",
-          !htmlObj && "index.html",
-          !sqlObj && "migration.sql",
+          workerJs === null && "worker.js",
+          indexHtml === null && "index.html",
+          migrationSql === null && "migration.sql",
         ] as (string | false)[]
       ).filter(Boolean) as string[];
 
@@ -310,14 +319,8 @@ export async function runBuildAgent(
         return `Error: missing files in R2: ${missing.join(", ")}. Write all three files before deploying.`;
       }
 
-      const [workerJs, indexHtml, migrationSql] = await Promise.all([
-        workerObj!.text(),
-        htmlObj!.text(),
-        sqlObj!.text(),
-      ]);
-
       try {
-        deployResult = await deployFn(workerJs, indexHtml, migrationSql);
+        deployResult = await deployFn(workerJs!, indexHtml!, migrationSql!);
         return `Deployed successfully. URL: ${deployResult.deployedUrl}`;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

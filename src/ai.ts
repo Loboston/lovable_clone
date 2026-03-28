@@ -1,5 +1,5 @@
 import type { Env, AppPlan } from "./types";
-export type { DeployFn } from "./agent";
+export type { DeployFn, StorageAdapter } from "./agent";
 export { runBuildAgent } from "./agent";
 
 const MODEL = "@cf/zai-org/glm-4.7-flash";

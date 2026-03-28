@@ -1,5 +1,50 @@
 const CF_API = "https://api.cloudflare.com/client/v4";
 
+// ─── R2 Object REST API ───────────────────────────────────────────────────────
+
+/**
+ * Download an R2 object via the Cloudflare REST API.
+ * Returns null if the object does not exist (404), throws on other errors.
+ */
+export async function r2GetObject(
+  accountId: string,
+  apiToken: string,
+  bucket: string,
+  key: string
+): Promise<string | null> {
+  const res = await fetch(
+    `${CF_API}/accounts/${accountId}/r2/buckets/${bucket}/objects/${key}`,
+    { headers: { Authorization: `Bearer ${apiToken}` } }
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`R2 read failed (${res.status}): ${await res.text()}`);
+  return res.text();
+}
+
+/**
+ * Upload a text object to R2 via the Cloudflare REST API.
+ */
+export async function r2PutObject(
+  accountId: string,
+  apiToken: string,
+  bucket: string,
+  key: string,
+  content: string
+): Promise<void> {
+  const res = await fetch(
+    `${CF_API}/accounts/${accountId}/r2/buckets/${bucket}/objects/${key}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        "Content-Type": "text/plain; charset=utf-8",
+      },
+      body: content,
+    }
+  );
+  if (!res.ok) throw new Error(`R2 write failed (${res.status}): ${await res.text()}`);
+}
+
 async function cfFetch(
   accountId: string,
   apiToken: string,

@@ -1,6 +1,6 @@
 import type { Env } from "./types";
 import { generatePlan, runBuildAgent } from "./ai";
-import type { DeployFn } from "./ai";
+import type { DeployFn, StorageAdapter } from "./ai";
 import {
   getOrCreateD1Database,
   runD1Query,
@@ -19,7 +19,7 @@ const R2_BUCKET_NAME = "user-code";
  *
  * Note: this only affects newly built/redeployed apps.
  */
-function wrapGeneratedWorkerForErrors(workerJs: string): string {
+export function wrapGeneratedWorkerForErrors(workerJs: string): string {
   const startMarker = "// --- platform error wrapper start ---";
   if (workerJs.includes(startMarker)) return workerJs;
 
@@ -152,8 +152,19 @@ export async function buildProject(
 
   // Run the Claude agent — reads existing files from R2, generates/patches all three,
   // writes them back to R2, then deploys via deployFiles
+  const prefix = `projects/${projectId}/`;
+  const storage: StorageAdapter = {
+    async readFile(filename) {
+      const obj = await env.CODE_BUCKET.get(`${prefix}${filename}`);
+      return obj ? obj.text() : null;
+    },
+    async writeFile(filename, content) {
+      await env.CODE_BUCKET.put(`${prefix}${filename}`, content);
+    },
+  };
+
   const deployFn: DeployFn = (workerJs, indexHtml, migrationSql) =>
     deployFiles(env, projectId, workerJs, indexHtml, migrationSql, baseUrl);
 
-  return await runBuildAgent(env, projectId, plan, conversation, isFirstDeploy, deployFn);
+  return await runBuildAgent(env.ANTHROPIC_API_KEY, storage, deployFn, projectId, plan, conversation, isFirstDeploy);
 }
