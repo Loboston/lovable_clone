@@ -190,6 +190,9 @@ function render() {
     })();
     const sendBtn = document.getElementById('sendBtn');
     const chatInput = document.getElementById('chatInput');
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBtn.click(); }
+    });
     sendBtn.onclick = async () => {
       const text = chatInput.value.trim();
       if (!text) return;

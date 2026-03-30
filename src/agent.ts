@@ -18,7 +18,7 @@ export interface StorageAdapter {
 }
 
 const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
-const AGENT_MODEL = "claude-haiku-4-5-20251001";
+const AGENT_MODEL = "claude-sonnet-4-6";
 const MAX_ITERATIONS = 20;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
