@@ -291,7 +291,8 @@ export async function deployUserWorker(params: DeployUserWorkerParams): Promise<
   formData.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
   formData.append(
     `${scriptName}.mjs`,
-    new Blob([scriptContent], { type: "application/javascript+module" })
+    new Blob([scriptContent], { type: "application/javascript+module" }),
+    `${scriptName}.mjs`
   );
 
   const deployRes = await fetch(

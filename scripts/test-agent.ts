@@ -87,7 +87,9 @@ function makeDeployFn(projectId: string): DeployFn {
     const workerName = `app-${projectId}`;
     const jwtSecret = randomId() + randomId();
     console.log(`[deploy] Deploying Worker: ${workerName}`);
+    console.log(`[deploy] worker.js size: ${workerJs.length} chars`);
 
+    try {
     await deployUserWorker({
       accountId: CF_ACCOUNT_ID,
       apiToken: CF_API_TOKEN,
@@ -99,6 +101,11 @@ function makeDeployFn(projectId: string): DeployFn {
       r2BucketName: CF_BUCKET_NAME,
       jwtSecret,
     });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[deploy] ERROR: ${msg}`);
+      throw err;
+    }
 
     const deployedUrl = `${PLATFORM_BASE_URL}/apps/${projectId}/`;
     return { deployedUrl, d1DatabaseId, workerName };
