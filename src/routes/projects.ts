@@ -85,6 +85,9 @@ app.post("/:id/build", async (c) => {
     await c.env.DB.prepare("UPDATE projects SET status = ? WHERE id = ?")
       .bind("error", id)
       .run();
+    await c.env.DB.prepare("INSERT INTO build_logs (project_id, error) VALUES (?, ?)")
+      .bind(id, message)
+      .run();
     return c.json({ error: message }, 500);
   }
 });
