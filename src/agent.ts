@@ -298,12 +298,17 @@ export async function runBuildAgent(
         return "Error: filename and content are required";
       }
       await storage.writeFile(input.filename, input.content);
-      if (onProgress) await onProgress(`Writing ${input.filename}...`);
+      const writeMessages: Record<string, string> = {
+        "worker.js":     "Cooking up the backend logic...",
+        "index.html":    "Crafting the frontend experience...",
+        "migration.sql": "Wrangling the database schema...",
+      };
+      if (onProgress) await onProgress(writeMessages[input.filename] ?? "Saving generated file...");
       return `${input.filename} written successfully.`;
     }
 
     if (name === "deploy_from_r2") {
-      if (onProgress) await onProgress("Deploying app to Cloudflare...");
+      if (onProgress) await onProgress("Deploying to 300+ data centers worldwide...");
       const [workerJs, indexHtml, migrationSql] = await Promise.all([
         storage.readFile("worker.js"),
         storage.readFile("index.html"),
@@ -324,7 +329,7 @@ export async function runBuildAgent(
 
       try {
         deployResult = await deployFn(workerJs!, indexHtml!, migrationSql!);
-        if (onProgress) await onProgress(`App deployed! URL: ${deployResult.deployedUrl}`);
+        if (onProgress) await onProgress("Your app is live!");
         return `Deployed successfully. URL: ${deployResult.deployedUrl}`;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

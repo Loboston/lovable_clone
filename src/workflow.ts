@@ -48,7 +48,7 @@ export class BuildWorkflow extends WorkflowEntrypoint<Env, BuildWorkflowParams> 
         await this.env.DB.prepare(
           "INSERT INTO build_events (project_id, message) VALUES (?, ?)"
         )
-          .bind(projectId, "Build complete!")
+          .bind(projectId, "Everything checks out — opening the doors!")
           .run();
       });
     } catch (err) {
