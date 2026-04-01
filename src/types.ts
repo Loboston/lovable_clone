@@ -1,5 +1,12 @@
 export type ProjectStatus = "draft" | "building" | "deployed" | "error";
 
+export interface BuildWorkflowClient {
+  create(options?: {
+    id?: string;
+    params?: { projectId: string; projectName: string; baseUrl: string };
+  }): Promise<{ id: string }>;
+}
+
 export interface Env {
   DB: D1Database;
   CODE_BUCKET: R2Bucket;
@@ -7,6 +14,7 @@ export interface Env {
   AI: Ai;
   /** Workers for Platforms dispatch namespace: DISPATCHER.get(scriptName) returns a Fetcher */
   DISPATCHER: { get: (scriptName: string) => Fetcher };
+  BUILD_WORKFLOW: BuildWorkflowClient;
   CLOUDFLARE_ACCOUNT_ID: string;
   CLOUDFLARE_API_TOKEN: string;
   PLATFORM_JWT_SECRET: string;

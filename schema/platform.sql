@@ -34,6 +34,14 @@ CREATE TABLE IF NOT EXISTS build_logs (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS build_events (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  message TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_project_id ON chat_messages(project_id);
 CREATE INDEX IF NOT EXISTS idx_build_logs_project_id ON build_logs(project_id);
+CREATE INDEX IF NOT EXISTS idx_build_events_project_id ON build_events(project_id);

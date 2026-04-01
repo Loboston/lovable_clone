@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { authMiddleware } from "../middleware";
 import type { Env } from "../types";
 import { randomId } from "../auth";
-import { buildProject } from "../build";
 import { deleteProject as teardownProject } from "../teardown";
 
 const app = new Hono<{ Bindings: Env; Variables: { user: { sub: string; email: string } } }>();
@@ -66,30 +65,44 @@ app.post("/:id/build", async (c) => {
     .first<{ id: string; user_id: string; name: string; status: string }>();
 
   if (!project) return c.json({ error: "Project not found" }, 404);
+  if (project.status === "building") return c.json({ error: "Build already in progress" }, 409);
 
   await c.env.DB.prepare("UPDATE projects SET status = ? WHERE id = ?")
     .bind("building", id)
     .run();
 
-  try {
-    const baseUrl = new URL(c.req.url).origin;
-    const result = await buildProject(c.env, id, project.name, baseUrl);
-    await c.env.DB.prepare(
-      "UPDATE projects SET status = ?, deployed_url = ?, d1_database_id = ?, worker_name = ?, updated_at = datetime('now') WHERE id = ?"
-    )
-      .bind("deployed", result.deployedUrl, result.d1DatabaseId, result.workerName, id)
-      .run();
-    return c.json({ success: true, deployed_url: result.deployedUrl });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Build failed";
-    await c.env.DB.prepare("UPDATE projects SET status = ? WHERE id = ?")
-      .bind("error", id)
-      .run();
-    await c.env.DB.prepare("INSERT INTO build_logs (project_id, error) VALUES (?, ?)")
-      .bind(id, message)
-      .run();
-    return c.json({ error: message }, 500);
-  }
+  const baseUrl = new URL(c.req.url).origin;
+  await c.env.BUILD_WORKFLOW.create({ params: { projectId: id, projectName: project.name, baseUrl } });
+
+  return c.json({ success: true, status: "building" });
+});
+
+app.get("/:id/events", async (c) => {
+  const id = c.req.param("id");
+  const user = c.get("user");
+  const since = c.req.query("since");
+
+  const project = await c.env.DB.prepare(
+    "SELECT id, status FROM projects WHERE id = ? AND user_id = ?"
+  )
+    .bind(id, user.sub)
+    .first<{ id: string; status: string }>();
+
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  const { results } = since
+    ? await c.env.DB.prepare(
+        "SELECT id, message, created_at FROM build_events WHERE project_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 50"
+      )
+        .bind(id, since)
+        .all()
+    : await c.env.DB.prepare(
+        "SELECT id, message, created_at FROM build_events WHERE project_id = ? ORDER BY created_at ASC LIMIT 50"
+      )
+        .bind(id)
+        .all();
+
+  return c.json({ events: results, status: project.status });
 });
 
 app.get("/:id/files", async (c) => {

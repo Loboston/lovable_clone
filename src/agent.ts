@@ -270,7 +270,8 @@ export async function runBuildAgent(
   projectId: string,
   plan: AppPlan | null,
   conversation: { role: string; content: string }[],
-  isFirstDeploy: boolean
+  isFirstDeploy: boolean,
+  onProgress?: (message: string) => Promise<void>
 ): Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }> {
   if (!apiKey || apiKey === "your-anthropic-api-key-here") {
     throw new Error(
@@ -297,10 +298,12 @@ export async function runBuildAgent(
         return "Error: filename and content are required";
       }
       await storage.writeFile(input.filename, input.content);
+      if (onProgress) await onProgress(`Writing ${input.filename}...`);
       return `${input.filename} written successfully.`;
     }
 
     if (name === "deploy_from_r2") {
+      if (onProgress) await onProgress("Deploying app to Cloudflare...");
       const [workerJs, indexHtml, migrationSql] = await Promise.all([
         storage.readFile("worker.js"),
         storage.readFile("index.html"),
@@ -321,6 +324,7 @@ export async function runBuildAgent(
 
       try {
         deployResult = await deployFn(workerJs!, indexHtml!, migrationSql!);
+        if (onProgress) await onProgress(`App deployed! URL: ${deployResult.deployedUrl}`);
         return `Deployed successfully. URL: ${deployResult.deployedUrl}`;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

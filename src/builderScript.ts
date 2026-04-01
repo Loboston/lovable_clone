@@ -133,39 +133,84 @@ function render() {
       if (statusEl) statusEl.textContent = 'building...';
       const buildingLi = document.createElement('li');
       buildingLi.className = 'text-left text-slate-400 italic';
-      buildingLi.textContent = 'Building your app... this takes about 30 seconds.';
+      buildingLi.textContent = 'Starting build...';
       ul.appendChild(buildingLi);
       ul.scrollTop = ul.scrollHeight;
+
       try {
         const r = await api(\`/api/projects/\${currentProjectId}/build\`, { method: 'POST' });
         const data = await r.json();
-        buildingLi.remove();
-        if (r.ok) {
-          const p = projects.find(x => x.id === currentProjectId);
-          if (p) { p.status = 'deployed'; p.deployed_url = data.deployed_url; }
-          if (statusEl) statusEl.textContent = 'deployed';
-          const header = document.querySelector('header .flex.items-center.gap-4');
-          if (header && !document.getElementById('openAppLink')) {
-            const link = document.createElement('a');
-            link.id = 'openAppLink';
-            link.href = data.deployed_url;
-            link.target = '_blank';
-            link.className = 'text-sm text-blue-400';
-            link.textContent = 'Open app';
-            header.appendChild(link);
-          }
-          const doneLi = document.createElement('li');
-          doneLi.className = 'text-left';
-          doneLi.innerHTML = \`App deployed! <a href="\${data.deployed_url}" target="_blank" class="text-blue-400 underline">Open it here</a>\`;
-          ul.appendChild(doneLi);
-          const frame = document.getElementById('previewFrame');
-          if (frame) frame.src = data.deployed_url;
-        } else {
+        if (!r.ok) {
+          buildingLi.remove();
           if (statusEl) statusEl.textContent = 'error';
           const errLi = document.createElement('li');
           errLi.className = 'text-left text-red-400';
           errLi.textContent = 'Build failed: ' + (data.error || 'Unknown error');
           ul.appendChild(errLi);
+          ul.scrollTop = ul.scrollHeight;
+          return;
+        }
+
+        buildingLi.textContent = 'Build started — watching progress...';
+        let lastCreatedAt = '';
+
+        while (true) {
+          await new Promise(res => setTimeout(res, 2000));
+          try {
+            const url = \`/api/projects/\${currentProjectId}/events\` + (lastCreatedAt ? \`?since=\${encodeURIComponent(lastCreatedAt)}\` : '');
+            const evRes = await api(url);
+            const evData = await evRes.json();
+
+            for (const ev of (evData.events || [])) {
+              const li = document.createElement('li');
+              li.className = 'text-left text-slate-300 text-sm italic';
+              li.textContent = ev.message;
+              ul.appendChild(li);
+              lastCreatedAt = ev.created_at;
+            }
+            ul.scrollTop = ul.scrollHeight;
+
+            if (evData.status === 'deployed') {
+              buildingLi.remove();
+              const projRes = await api(\`/api/projects/\${currentProjectId}\`);
+              const projData = await projRes.json();
+              const deployedUrl = projData.project?.deployed_url;
+              if (deployedUrl) {
+                const p = projects.find(x => x.id === currentProjectId);
+                if (p) { p.status = 'deployed'; p.deployed_url = deployedUrl; }
+                if (statusEl) statusEl.textContent = 'deployed';
+                const header = document.querySelector('header .flex.items-center.gap-4');
+                if (header && !document.getElementById('openAppLink')) {
+                  const link = document.createElement('a');
+                  link.id = 'openAppLink';
+                  link.href = deployedUrl;
+                  link.target = '_blank';
+                  link.className = 'text-sm text-blue-400';
+                  link.textContent = 'Open app';
+                  header.appendChild(link);
+                }
+                const doneLi = document.createElement('li');
+                doneLi.className = 'text-left';
+                doneLi.innerHTML = \`App deployed! <a href="\${deployedUrl}" target="_blank" class="text-blue-400 underline">Open it here</a>\`;
+                ul.appendChild(doneLi);
+                const frame = document.getElementById('previewFrame');
+                if (frame) frame.src = deployedUrl;
+              }
+              break;
+            }
+
+            if (evData.status === 'error') {
+              buildingLi.remove();
+              if (statusEl) statusEl.textContent = 'error';
+              const errLi = document.createElement('li');
+              errLi.className = 'text-left text-red-400';
+              errLi.textContent = 'Build failed. See messages above for details.';
+              ul.appendChild(errLi);
+              break;
+            }
+          } catch (_) {
+            // network hiccup during poll — just retry next cycle
+          }
         }
       } catch (err) {
         buildingLi.remove();

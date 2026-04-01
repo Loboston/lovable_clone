@@ -125,7 +125,8 @@ export async function buildProject(
   env: Env,
   projectId: string,
   projectName: string,
-  baseUrl: string
+  baseUrl: string,
+  onProgress?: (message: string) => Promise<void>
 ): Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }> {
   const accountId = env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = env.CLOUDFLARE_API_TOKEN;
@@ -166,5 +167,5 @@ export async function buildProject(
   const deployFn: DeployFn = (workerJs, indexHtml, migrationSql) =>
     deployFiles(env, projectId, workerJs, indexHtml, migrationSql, baseUrl);
 
-  return await runBuildAgent(env.ANTHROPIC_API_KEY, storage, deployFn, projectId, plan, conversation, isFirstDeploy);
+  return await runBuildAgent(env.ANTHROPIC_API_KEY, storage, deployFn, projectId, plan, conversation, isFirstDeploy, onProgress);
 }
