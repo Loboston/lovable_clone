@@ -1,6 +1,6 @@
 import type { Env } from "./types";
-import { generatePlan, runBuildAgent } from "./ai";
-import type { DeployFn, StorageAdapter } from "./ai";
+import { runBuildAgent } from "./ai";
+import type { AgentResult, DeployFn, StorageAdapter } from "./ai";
 import {
   getOrCreateD1Database,
   runD1Query,
@@ -127,7 +127,7 @@ export async function buildProject(
   projectName: string,
   baseUrl: string,
   onProgress?: (message: string) => Promise<void>
-): Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }> {
+): Promise<AgentResult> {
   const accountId = env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = env.CLOUDFLARE_API_TOKEN;
   if (!accountId || !apiToken) {
@@ -143,16 +143,10 @@ export async function buildProject(
 
   const conversation = (history.results ?? []) as { role: string; content: string }[];
 
-  // Check if this project has been deployed before by looking for existing files in R2
+  // Check if files exist in R2 to determine first vs update deploy
   const existingWorker = await env.CODE_BUCKET.get(`projects/${projectId}/worker.js`);
   const isFirstDeploy = existingWorker === null;
 
-  // On first deploy: generate a full plan from conversation
-  // On update deploy: skip plan regeneration to prevent drift (auth screens appearing, layout changes, etc.)
-  const plan = isFirstDeploy ? await generatePlan(env, conversation) : null;
-
-  // Run the Claude agent — reads existing files from R2, generates/patches all three,
-  // writes them back to R2, then deploys via deployFiles
   const prefix = `projects/${projectId}/`;
   const storage: StorageAdapter = {
     async readFile(filename) {
@@ -167,5 +161,5 @@ export async function buildProject(
   const deployFn: DeployFn = (workerJs, indexHtml, migrationSql) =>
     deployFiles(env, projectId, workerJs, indexHtml, migrationSql, baseUrl);
 
-  return await runBuildAgent(env.ANTHROPIC_API_KEY, storage, deployFn, projectId, plan, conversation, isFirstDeploy, onProgress);
+  return await runBuildAgent(env.ANTHROPIC_API_KEY, storage, deployFn, projectId, conversation, isFirstDeploy, onProgress);
 }

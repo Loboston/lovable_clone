@@ -128,65 +128,119 @@ function render() {
     \`;
     document.getElementById('backBtn').onclick = () => { currentProjectId = null; render(); };
 
-    async function triggerBuild(ul) {
-      const statusEl = document.getElementById('projectStatus');
-      if (statusEl) statusEl.textContent = 'building...';
-      const buildingLi = document.createElement('li');
-      buildingLi.className = 'text-left text-slate-400 italic';
-      buildingLi.textContent = 'Starting build...';
-      ul.appendChild(buildingLi);
+    let lastMessageAt = '';
+    (async () => {
+      const r = await api(\`/api/chat/\${currentProjectId}/history\`);
+      const data = await r.json();
+      const ul = document.getElementById('chatMessages');
+      (data.messages || []).forEach(m => {
+        const li = document.createElement('li');
+        li.className = m.role === 'user' ? 'text-right' : 'text-left';
+        li.textContent = m.content?.slice(0, 300) + (m.content?.length > 300 ? '...' : '');
+        ul.appendChild(li);
+        if (m.created_at) lastMessageAt = m.created_at;
+      });
+      ul.scrollTop = ul.scrollHeight;
+    })();
+
+    const sendBtn = document.getElementById('sendBtn');
+    const chatInput = document.getElementById('chatInput');
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBtn.click(); }
+    });
+
+    sendBtn.onclick = async () => {
+      const text = chatInput.value.trim();
+      if (!text) return;
+      const ul = document.getElementById('chatMessages');
+
+      const userLi = document.createElement('li');
+      userLi.className = 'text-right';
+      userLi.textContent = text;
+      ul.appendChild(userLi);
+      chatInput.value = '';
+      sendBtn.disabled = true;
       ul.scrollTop = ul.scrollHeight;
 
+      const thinkingLi = document.createElement('li');
+      thinkingLi.className = 'text-left text-slate-400 italic';
+      thinkingLi.textContent = 'Thinking...';
+      ul.appendChild(thinkingLi);
+      ul.scrollTop = ul.scrollHeight;
+      let thinkingRemoved = false;
+      function removeThinking() { if (!thinkingRemoved) { thinkingLi.remove(); thinkingRemoved = true; } }
+
       try {
-        const r = await api(\`/api/projects/\${currentProjectId}/build\`, { method: 'POST' });
-        const data = await r.json();
-        if (!r.ok) {
-          buildingLi.remove();
-          if (statusEl) statusEl.textContent = 'error';
+        const res = await api('/api/chat', { method: 'POST', body: { project_id: currentProjectId, message: text } });
+        const data = await res.json();
+        if (!res.ok) {
+          removeThinking();
           const errLi = document.createElement('li');
           errLi.className = 'text-left text-red-400';
-          errLi.textContent = 'Build failed: ' + (data.error || 'Unknown error');
+          errLi.textContent = data.error || 'Something went wrong';
           ul.appendChild(errLi);
-          ul.scrollTop = ul.scrollHeight;
           return;
         }
 
-        buildingLi.textContent = 'Build started — watching progress...';
-        let lastCreatedAt = '';
+        // Poll for the agent's chat responses and any build progress events
+        let lastEventAt = '';
+        let stableCount = 0;
+        const MAX_POLL = 90; // ~3 minutes
 
-        while (true) {
-          await new Promise(res => setTimeout(res, 2000));
+        for (let i = 0; i < MAX_POLL; i++) {
+          await new Promise(r => setTimeout(r, 2000));
+          let gotNew = false;
+
           try {
-            const url = \`/api/projects/\${currentProjectId}/events\` + (lastCreatedAt ? \`?since=\${encodeURIComponent(lastCreatedAt)}\` : '');
-            const evRes = await api(url);
-            const evData = await evRes.json();
+            // New chat messages from the agent
+            const msgUrl = \`/api/chat/\${currentProjectId}/history?since=\${encodeURIComponent(lastMessageAt)}\`;
+            const msgRes = await api(msgUrl);
+            const msgData = await msgRes.json();
+            for (const m of (msgData.messages || [])) {
+              if (m.role === 'assistant') {
+                removeThinking();
+                const li = document.createElement('li');
+                li.className = 'text-left';
+                li.textContent = m.content?.slice(0, 500) + (m.content?.length > 500 ? '...' : '');
+                ul.appendChild(li);
+                lastMessageAt = m.created_at;
+                gotNew = true;
+              }
+            }
 
+            // Build progress events
+            const evUrl = \`/api/projects/\${currentProjectId}/events\` + (lastEventAt ? \`?since=\${encodeURIComponent(lastEventAt)}\` : '');
+            const evRes = await api(evUrl);
+            const evData = await evRes.json();
             for (const ev of (evData.events || [])) {
+              removeThinking();
               const li = document.createElement('li');
               li.className = 'text-left text-slate-300 text-sm italic';
               li.textContent = ev.message;
               ul.appendChild(li);
-              lastCreatedAt = ev.created_at;
+              lastEventAt = ev.created_at;
+              gotNew = true;
             }
+
+            const status = evData.status;
             ul.scrollTop = ul.scrollHeight;
 
-            if (evData.status === 'deployed') {
-              buildingLi.remove();
+            if (status === 'deployed') {
               const projRes = await api(\`/api/projects/\${currentProjectId}\`);
               const projData = await projRes.json();
               const deployedUrl = projData.project?.deployed_url;
               if (deployedUrl) {
                 const p = projects.find(x => x.id === currentProjectId);
                 if (p) { p.status = 'deployed'; p.deployed_url = deployedUrl; }
+                const statusEl = document.getElementById('projectStatus');
                 if (statusEl) statusEl.textContent = 'deployed';
                 const header = document.querySelector('header .flex.items-center.gap-4');
-                if (header && !document.getElementById('openAppLink')) {
+                const existingLink = document.getElementById('openAppLink');
+                if (existingLink) { existingLink.href = deployedUrl; }
+                else if (header) {
                   const link = document.createElement('a');
-                  link.id = 'openAppLink';
-                  link.href = deployedUrl;
-                  link.target = '_blank';
-                  link.className = 'text-sm text-blue-400';
-                  link.textContent = 'Open app';
+                  link.id = 'openAppLink'; link.href = deployedUrl; link.target = '_blank';
+                  link.className = 'text-sm text-blue-400'; link.textContent = 'Open app';
                   header.appendChild(link);
                 }
                 const doneLi = document.createElement('li');
@@ -199,8 +253,8 @@ function render() {
               break;
             }
 
-            if (evData.status === 'error') {
-              buildingLi.remove();
+            if (status === 'error') {
+              const statusEl = document.getElementById('projectStatus');
               if (statusEl) statusEl.textContent = 'error';
               const errLi = document.createElement('li');
               errLi.className = 'text-left text-red-400';
@@ -208,61 +262,27 @@ function render() {
               ul.appendChild(errLi);
               break;
             }
-          } catch (_) {
-            // network hiccup during poll — just retry next cycle
-          }
+
+            // Stop polling once the agent is done (not thinking/building) and no new content
+            if (status !== 'thinking' && status !== 'building') {
+              if (!gotNew) {
+                stableCount++;
+                if (stableCount >= 3) break;
+              } else {
+                stableCount = 0;
+              }
+            }
+          } catch (_) { /* network hiccup — retry next cycle */ }
         }
       } catch (err) {
-        buildingLi.remove();
-        if (statusEl) statusEl.textContent = 'error';
         const errLi = document.createElement('li');
         errLi.className = 'text-left text-red-400';
-        errLi.textContent = 'Build failed: ' + err.message;
+        errLi.textContent = 'Error: ' + err.message;
         ul.appendChild(errLi);
-      }
-      ul.scrollTop = ul.scrollHeight;
-    }
-    (async () => {
-      const r = await api(\`/api/chat/\${currentProjectId}/history\`);
-      const data = await r.json();
-      const ul = document.getElementById('chatMessages');
-      (data.messages || []).forEach(m => {
-        const li = document.createElement('li');
-        li.className = m.role === 'user' ? 'text-right' : 'text-left';
-        li.textContent = m.content?.slice(0, 200) + (m.content?.length > 200 ? '...' : '');
-        ul.appendChild(li);
-      });
-    })();
-    const sendBtn = document.getElementById('sendBtn');
-    const chatInput = document.getElementById('chatInput');
-    chatInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBtn.click(); }
-    });
-    sendBtn.onclick = async () => {
-      const text = chatInput.value.trim();
-      if (!text) return;
-      const ul = document.getElementById('chatMessages');
-      const userLi = document.createElement('li');
-      userLi.className = 'text-right';
-      userLi.textContent = text;
-      ul.appendChild(userLi);
-      chatInput.value = '';
-      sendBtn.disabled = true;
-      ul.scrollTop = ul.scrollHeight;
-      try {
-        const res = await api('/api/chat', { method: 'POST', body: { project_id: currentProjectId, message: text } });
-        const data = await res.json();
-        if (!res.ok) return;
-        const assistantLi = document.createElement('li');
-        assistantLi.className = 'text-left';
-        assistantLi.textContent = data.message;
-        ul.appendChild(assistantLi);
-        ul.scrollTop = ul.scrollHeight;
-        if (data.build) {
-          await triggerBuild(ul);
-        }
       } finally {
+        removeThinking();
         sendBtn.disabled = false;
+        ul.scrollTop = ul.scrollHeight;
       }
     };
     return;

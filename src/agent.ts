@@ -5,7 +5,6 @@
  * Each iteration: call Claude → if tool_use, execute tools and feed results back → repeat until end_turn.
  */
 
-import type { AppPlan } from "./types";
 
 /**
  * Abstracts how the agent reads and writes the three generated files.
@@ -47,6 +46,14 @@ export type DeployFn = (
   indexHtml: string,
   migrationSql: string
 ) => Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }>;
+
+export interface AgentResult {
+  deployed: boolean;
+  deployedUrl?: string;
+  d1DatabaseId?: string;
+  workerName?: string;
+  assistantMessages: string[];
+}
 
 // ─── Tool Definitions ─────────────────────────────────────────────────────────
 
@@ -150,26 +157,35 @@ const INDEX_HTML_SCAFFOLD = `<!DOCTYPE html>
   </body>
 </html>`;
 
-const AGENT_SYSTEM = `You are a code generation agent for a Cloudflare app builder platform.
+const AGENT_SYSTEM = `You are an AI assistant built into a Cloudflare app builder platform. You talk directly with users and help them create and iterate on web applications that run on Cloudflare Workers.
 
-Your job: use your tools to generate worker.js, index.html, and migration.sql for the user's app, then deploy them.
+## How to behave
+- Be direct and conversational. Lead with what you're doing, not what you plan to do.
+- When the user's intent is clear, act immediately — do not ask for confirmation.
+- When the request is ambiguous, ask exactly one short clarifying question.
 
-## Workflow
+## When to respond without building
+Answer questions, discuss ideas, or ask for clarification — no tools needed. You can call read_from_r2 to inspect the user's current app before answering questions about it.
 
-FIRST DEPLOY (a Plan is provided in the user message):
-1. Generate all three files fresh from the plan. Do NOT call read_from_r2 — the files don't exist yet.
+## When to build
+Build whenever the user asks to create, make, build, update, change, fix, or improve an app.
+
+### Build workflow
+
+FIRST DEPLOY (no existing R2 files):
+1. Generate all three files fresh from the conversation. Do NOT call read_from_r2 first.
 2. Call write_to_r2 for each file.
 3. Call deploy_from_r2.
 
-UPDATE DEPLOY (no Plan — "this is an update deploy"):
+UPDATE DEPLOY (files exist in R2):
 1. Call read_from_r2 for all three files to load the current state.
-2. Determine the scope of changes from the user's last message:
-   - PATCH (default): small changes — colors, wording, adding one field, fixing a bug. Only modify the specific parts that need to change. Keep all existing routes, DB schema, auth logic, components, and page structure.
-   - REWRITE: only if the user explicitly says "start over", "rebuild from scratch", or requests a completely different app type.
-3. Call write_to_r2 for each changed file (always write all three to keep R2 in sync).
+2. Scope:
+   - PATCH (default): small targeted change — fix a bug, change a color, add one field. Only modify what's needed. Keep all existing routes, DB schema, auth logic, and page structure.
+   - REWRITE: only when user says "start over", "rebuild from scratch", or wants a completely different app type.
+3. Call write_to_r2 for each file (write all three to keep R2 in sync).
 4. Call deploy_from_r2.
 
-In PATCH mode: do not add login screens, new pages, or new DB tables unless explicitly asked. Do not rename or remove existing DB tables or API routes.
+In PATCH mode: do not add login screens, new pages, or DB tables unless explicitly asked. Do not rename or remove existing tables or routes.
 
 ## File Requirements
 
@@ -243,7 +259,6 @@ async function callAnthropic(
 
 function buildInitialMessage(
   projectId: string,
-  plan: AppPlan | null,
   conversation: { role: string; content: string }[],
   isFirstDeploy: boolean
 ): string {
@@ -252,15 +267,11 @@ function buildInitialMessage(
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
 
-  const planSection = plan
-    ? `Plan:\n${JSON.stringify(plan, null, 2)}`
-    : `No plan — this is an update deploy. Read the existing files from R2 first, then apply only the changes the user requested.`;
+  const context = isFirstDeploy
+    ? "This is a first deploy — no files exist in R2 yet."
+    : "Files exist in R2 from a previous deploy — read them before making changes.";
 
-  const instruction = isFirstDeploy
-    ? "Generate all three files fresh from the plan above and deploy."
-    : "Read the existing files from R2, patch only what the user asked for, then deploy.";
-
-  return `${planSection}\n\nRecent conversation:\n${convStr}\n\nProject ID: ${projectId}\n\n${instruction}`;
+  return `Recent conversation:\n${convStr}\n\nProject ID: ${projectId}\n${context}`;
 }
 
 export async function runBuildAgent(
@@ -268,11 +279,10 @@ export async function runBuildAgent(
   storage: StorageAdapter,
   deployFn: DeployFn,
   projectId: string,
-  plan: AppPlan | null,
   conversation: { role: string; content: string }[],
   isFirstDeploy: boolean,
   onProgress?: (message: string) => Promise<void>
-): Promise<{ deployedUrl: string; d1DatabaseId: string; workerName: string }> {
+): Promise<AgentResult> {
   if (!apiKey || apiKey === "your-anthropic-api-key-here") {
     throw new Error(
       "ANTHROPIC_API_KEY is not set — add it to wrangler.toml or run: wrangler secret put ANTHROPIC_API_KEY"
@@ -281,6 +291,7 @@ export async function runBuildAgent(
 
   let deployResult: { deployedUrl: string; d1DatabaseId: string; workerName: string } | null =
     null;
+  const assistantMessages: string[] = [];
 
   // ── Tool execution ──────────────────────────────────────────────────────────
 
@@ -345,23 +356,31 @@ export async function runBuildAgent(
   const messages: AgentMessage[] = [
     {
       role: "user",
-      content: buildInitialMessage(projectId, plan, conversation, isFirstDeploy),
+      content: buildInitialMessage(projectId, conversation, isFirstDeploy),
     },
   ];
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const response = await callAnthropic(apiKey, messages);
 
+    // Collect any text blocks the agent produced (these become chat messages shown to the user)
+    for (const block of response.content) {
+      if (block.type === "text" && block.text.trim()) {
+        assistantMessages.push(block.text.trim());
+      }
+    }
+
     // Append the assistant's full response (may include text + tool_use blocks)
     messages.push({ role: "assistant", content: response.content });
 
     if (response.stop_reason === "end_turn") {
-      if (!deployResult) {
-        throw new Error(
-          "Agent finished without deploying. The deploy_from_r2 tool was not called."
-        );
-      }
-      return deployResult;
+      return {
+        deployed: !!deployResult,
+        deployedUrl: deployResult?.deployedUrl,
+        d1DatabaseId: deployResult?.d1DatabaseId,
+        workerName: deployResult?.workerName,
+        assistantMessages,
+      };
     }
 
     if (response.stop_reason === "tool_use") {
@@ -384,5 +403,5 @@ export async function runBuildAgent(
     }
   }
 
-  throw new Error("Agent exceeded maximum iterations without completing the build.");
+  throw new Error("Agent exceeded maximum iterations without completing.");
 }

@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { authMiddleware } from "../middleware";
 import type { Env } from "../types";
-import { streamChat } from "../ai";
 
 const app = new Hono<{ Bindings: Env; Variables: { user: { sub: string; email: string } } }>();
 
@@ -19,43 +18,39 @@ app.post("/", async (c) => {
   const user = c.get("user");
 
   const project = await c.env.DB.prepare(
-    "SELECT id FROM projects WHERE id = ? AND user_id = ?"
+    "SELECT id, name, status FROM projects WHERE id = ? AND user_id = ?"
   )
     .bind(projectId, user.sub)
-    .first();
+    .first<{ id: string; name: string; status: string }>();
 
   if (!project) return c.json({ error: "Project not found" }, 404);
 
+  // Save the user message
   await c.env.DB.prepare(
     "INSERT INTO chat_messages (project_id, role, content) VALUES (?, ?, ?)"
   )
     .bind(projectId, "user", message)
     .run();
 
-  const history = await c.env.DB.prepare(
-    "SELECT role, content FROM chat_messages WHERE project_id = ? ORDER BY created_at ASC LIMIT 50"
-  )
-    .bind(projectId)
-    .all();
-
-  const { message: assistantMessage, build } = await streamChat(
-    c.env,
-    message,
-    history.results as { role: string; content: string }[]
-  );
-
-  await c.env.DB.prepare(
-    "INSERT INTO chat_messages (project_id, role, content) VALUES (?, ?, ?)"
-  )
-    .bind(projectId, "assistant", assistantMessage)
+  // Set project to "thinking" so the UI knows the agent is running
+  const previousStatus = project.status;
+  await c.env.DB.prepare("UPDATE projects SET status = ? WHERE id = ?")
+    .bind("thinking", projectId)
     .run();
 
-  return c.json({ message: assistantMessage, build });
+  // Trigger the workflow — it runs the agent, saves its response, and updates status
+  const baseUrl = new URL(c.req.url).origin;
+  await c.env.BUILD_WORKFLOW.create({
+    params: { projectId, projectName: project.name, baseUrl, previousStatus },
+  });
+
+  return c.json({ success: true });
 });
 
 app.get("/:projectId/history", async (c) => {
   const projectId = c.req.param("projectId");
   const user = c.get("user");
+  const since = c.req.query("since");
 
   const project = await c.env.DB.prepare(
     "SELECT id FROM projects WHERE id = ? AND user_id = ?"
@@ -65,36 +60,19 @@ app.get("/:projectId/history", async (c) => {
 
   if (!project) return c.json({ error: "Project not found" }, 404);
 
-  const { results } = await c.env.DB.prepare(
-    "SELECT id, role, content, created_at FROM chat_messages WHERE project_id = ? ORDER BY created_at ASC"
-  )
-    .bind(projectId)
-    .all();
+  const { results } = since
+    ? await c.env.DB.prepare(
+        "SELECT id, role, content, created_at FROM chat_messages WHERE project_id = ? AND created_at > ? ORDER BY created_at ASC"
+      )
+        .bind(projectId, since)
+        .all()
+    : await c.env.DB.prepare(
+        "SELECT id, role, content, created_at FROM chat_messages WHERE project_id = ? ORDER BY created_at ASC"
+      )
+        .bind(projectId)
+        .all();
 
   return c.json({ messages: results });
-});
-
-app.post("/save-assistant", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { project_id?: string; content?: string };
-  const projectId = typeof body.project_id === "string" ? body.project_id.trim() : "";
-  const content = typeof body.content === "string" ? body.content : "";
-
-  if (!projectId || !content) {
-    return c.json({ error: "project_id and content required" }, 400);
-  }
-
-  const user = c.get("user");
-  const project = await c.env.DB.prepare(
-    "SELECT id FROM projects WHERE id = ? AND user_id = ?"
-  )
-    .bind(projectId, user.sub)
-    .first();
-
-  if (!project) return c.json({ error: "Project not found" }, 404);
-
-  const { saveAssistantMessage } = await import("../ai");
-  await saveAssistantMessage(c.env, projectId, content);
-  return c.json({ success: true });
 });
 
 export default app;

@@ -1,9 +1,9 @@
-export type ProjectStatus = "draft" | "building" | "deployed" | "error";
+export type ProjectStatus = "draft" | "building" | "thinking" | "deployed" | "error";
 
 export interface BuildWorkflowClient {
   create(options?: {
     id?: string;
-    params?: { projectId: string; projectName: string; baseUrl: string };
+    params?: { projectId: string; projectName: string; baseUrl: string; previousStatus: string };
   }): Promise<{ id: string }>;
 }
 
