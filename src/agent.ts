@@ -163,6 +163,9 @@ const AGENT_SYSTEM = `You are an AI assistant built into a Cloudflare app builde
 - Be direct and conversational. Lead with what you're doing, not what you plan to do.
 - When the user's intent is clear, act immediately — do not ask for confirmation.
 - When the request is ambiguous, ask exactly one short clarifying question.
+- Use plain text only — no markdown, no asterisks, no emoji, no bullet points with dashes or stars.
+- Do not include the deployed URL in your response — the platform surfaces it automatically.
+- When using tools, announce what you're doing in one short plain-text sentence before each tool call.
 
 ## When to respond without building
 Answer questions, discuss ideas, or ask for clarification — no tools needed. You can call read_from_r2 to inspect the user's current app before answering questions about it.
@@ -363,17 +366,16 @@ export async function runBuildAgent(
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const response = await callAnthropic(apiKey, messages);
 
-    // Collect any text blocks the agent produced (these become chat messages shown to the user)
-    for (const block of response.content) {
-      if (block.type === "text" && block.text.trim()) {
-        assistantMessages.push(block.text.trim());
-      }
-    }
-
     // Append the assistant's full response (may include text + tool_use blocks)
     messages.push({ role: "assistant", content: response.content });
 
     if (response.stop_reason === "end_turn") {
+      // Text blocks at end_turn are the final reply shown in chat
+      for (const block of response.content) {
+        if (block.type === "text" && block.text.trim()) {
+          assistantMessages.push(block.text.trim());
+        }
+      }
       return {
         deployed: !!deployResult,
         deployedUrl: deployResult?.deployedUrl,
@@ -384,6 +386,13 @@ export async function runBuildAgent(
     }
 
     if (response.stop_reason === "tool_use") {
+      // Text blocks alongside tool calls are mid-build commentary — show as progress
+      for (const block of response.content) {
+        if (block.type === "text" && block.text.trim() && onProgress) {
+          await onProgress(block.text.trim());
+        }
+      }
+
       // Execute all tool calls in this turn, then feed all results back in one user message
       const toolResults: ToolResultBlock[] = [];
 
