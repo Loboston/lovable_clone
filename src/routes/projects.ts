@@ -17,28 +17,27 @@ app.post("/", async (c) => {
   if (typeof body.description === "string" && body.description.trim()) {
     const desc = body.description.trim();
     try {
-      const out = await c.env.AI.run("@cf/zai-org/glm-4.7-flash" as never, {
-        messages: [
-          { role: "system", content: "Generate a short 3-6 word project name from the user's app description. Output only the name, no quotes, no punctuation, no explanation." },
-          { role: "user", content: desc },
-        ],
-        stream: false,
-        max_tokens: 20,
-      } as never);
-      let raw = "";
-      if (typeof out === "string") {
-        raw = out;
-      } else {
-        const o = out as Record<string, unknown>;
-        const content = (o?.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content;
-        if (typeof content === "string") raw = content;
-        else if (typeof o?.response === "string") raw = o.response;
-        else {
-          const result = o?.result as Record<string, unknown> | undefined;
-          if (result && typeof result.response === "string") raw = result.response;
-        }
-      }
-      name = raw.trim().slice(0, 60) || desc.slice(0, 40);
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": c.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 30,
+          messages: [
+            {
+              role: "user",
+              content: `Generate a short 3-6 word project name for this app. Output ONLY the name, nothing else:\n"${desc.slice(0, 300)}"`,
+            },
+          ],
+        }),
+      });
+      const data = await res.json() as { content?: Array<{ text?: string }> };
+      const generated = data.content?.[0]?.text?.trim() ?? "";
+      name = generated.slice(0, 60) || desc.slice(0, 40);
     } catch {
       name = desc.slice(0, 40);
     }
