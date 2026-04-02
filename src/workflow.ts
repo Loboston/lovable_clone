@@ -64,7 +64,7 @@ export class BuildWorkflow extends WorkflowEntrypoint<Env, BuildWorkflowParams> 
           await this.env.DB.prepare(
             "INSERT INTO build_events (project_id, message) VALUES (?, ?)"
           )
-            .bind(projectId, "Everything checks out — opening the doors!")
+            .bind(projectId, "Deployment complete")
             .run();
         } else {
           // Agent just chatted — restore the previous status

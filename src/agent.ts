@@ -59,6 +59,37 @@ export interface AgentResult {
 
 const AGENT_TOOLS = [
   {
+    name: "emit_progress",
+    description: `Emit a short, user-visible progress update during a build or fix.
+
+Call this before major actions and after milestones so the user knows what is happening.
+Messages must be concrete and specific to the current task — not generic filler.
+
+Good: "Planning the auth routes", "Generating the standings endpoint", "Fixing the API response parser"
+Bad: "Thinking...", "Processing...", "Working on it..."
+
+Types:
+- "progress" — general status (planning, analyzing, reading, fixing)
+- "file_write" — about to write or update a file
+- "deploy" — deployment is starting
+- "complete" — a milestone finished`,
+    input_schema: {
+      type: "object",
+      properties: {
+        type: {
+          type: "string",
+          enum: ["progress", "file_write", "deploy", "complete"],
+          description: "Category of the progress event",
+        },
+        message: {
+          type: "string",
+          description: "Short progress message shown to the user. Keep under 80 characters.",
+        },
+      },
+      required: ["type", "message"],
+    },
+  },
+  {
     name: "read_from_r2",
     description: `Read a previously generated file from R2 object storage for this project.
 
@@ -165,7 +196,15 @@ const AGENT_SYSTEM = `You are an AI assistant built into a Cloudflare app builde
 - When the request is ambiguous, ask exactly one short clarifying question.
 - Use plain text only — no markdown, no asterisks, no emoji, no bullet points with dashes or stars.
 - Do not include the deployed URL in your response — the platform surfaces it automatically.
-- When using tools, announce what you're doing in one short plain-text sentence before each tool call.
+- Do not output text blocks while calling other tools. Use emit_progress instead to communicate with the user during a build.
+
+## Progress updates
+Call emit_progress before every major action and after every milestone. Be specific to the task at hand.
+- Before reading files: "Reading the current worker to diagnose the issue"
+- Before writing: "Writing the API routes for user authentication"
+- Before deploying: "Deploying to Cloudflare"
+- After a milestone: "Auth routes complete, building the frontend"
+Do not use emit_progress for vague filler — every message should tell the user something concrete.
 
 ## When to respond without building
 Answer questions, discuss ideas, or ask for clarification — no tools needed. You can call read_from_r2 to inspect the user's current app before answering questions about it.
@@ -299,6 +338,11 @@ export async function runBuildAgent(
   // ── Tool execution ──────────────────────────────────────────────────────────
 
   async function executeTool(name: string, input: Record<string, string>): Promise<string> {
+    if (name === "emit_progress") {
+      if (onProgress) await onProgress(input.message);
+      return "Progress emitted.";
+    }
+
     if (name === "read_from_r2") {
       const content = await storage.readFile(input.filename);
       if (content === null) {
@@ -312,17 +356,10 @@ export async function runBuildAgent(
         return "Error: filename and content are required";
       }
       await storage.writeFile(input.filename, input.content);
-      const writeMessages: Record<string, string> = {
-        "worker.js":     "Cooking up the backend logic...",
-        "index.html":    "Crafting the frontend experience...",
-        "migration.sql": "Wrangling the database schema...",
-      };
-      if (onProgress) await onProgress(writeMessages[input.filename] ?? "Saving generated file...");
       return `${input.filename} written successfully.`;
     }
 
     if (name === "deploy_from_r2") {
-      if (onProgress) await onProgress("Deploying to 300+ data centers worldwide...");
       const [workerJs, indexHtml, migrationSql] = await Promise.all([
         storage.readFile("worker.js"),
         storage.readFile("index.html"),
@@ -343,7 +380,6 @@ export async function runBuildAgent(
 
       try {
         deployResult = await deployFn(workerJs!, indexHtml!, migrationSql!);
-        if (onProgress) await onProgress("Your app is live!");
         return `Deployed successfully. URL: ${deployResult.deployedUrl}`;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -386,13 +422,6 @@ export async function runBuildAgent(
     }
 
     if (response.stop_reason === "tool_use") {
-      // Text blocks alongside tool calls are mid-build commentary — show as progress
-      for (const block of response.content) {
-        if (block.type === "text" && block.text.trim() && onProgress) {
-          await onProgress(block.text.trim());
-        }
-      }
-
       // Execute all tool calls in this turn, then feed all results back in one user message
       const toolResults: ToolResultBlock[] = [];
 

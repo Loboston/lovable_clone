@@ -129,6 +129,7 @@ function render() {
     document.getElementById('backBtn').onclick = () => { currentProjectId = null; render(); };
 
     let lastMessageAt = '';
+    let lastEventAt = '';
     (async () => {
       const r = await api(\`/api/chat/\${currentProjectId}/history\`);
       const data = await r.json();
@@ -164,11 +165,22 @@ function render() {
 
       const thinkingLi = document.createElement('li');
       thinkingLi.className = 'text-left text-slate-400 italic';
-      thinkingLi.textContent = 'Thinking...';
+      thinkingLi.textContent = 'Thinking.';
       ul.appendChild(thinkingLi);
       ul.scrollTop = ul.scrollHeight;
+      let dotCount = 1;
+      const ellipsisInterval = setInterval(() => {
+        dotCount = (dotCount % 3) + 1;
+        thinkingLi.textContent = 'Thinking' + '.'.repeat(dotCount);
+      }, 500);
       let thinkingRemoved = false;
-      function removeThinking() { if (!thinkingRemoved) { thinkingLi.remove(); thinkingRemoved = true; } }
+      function removeThinking() {
+        if (!thinkingRemoved) {
+          clearInterval(ellipsisInterval);
+          thinkingLi.remove();
+          thinkingRemoved = true;
+        }
+      }
 
       try {
         const res = await api('/api/chat', { method: 'POST', body: { project_id: currentProjectId, message: text } });
@@ -183,7 +195,6 @@ function render() {
         }
 
         // Poll for the agent's chat responses and any build progress events
-        let lastEventAt = '';
         let stableCount = 0;
         const MAX_POLL = 90; // ~3 minutes
 
