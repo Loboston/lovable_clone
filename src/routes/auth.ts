@@ -1,8 +1,9 @@
 import { Hono } from "hono";
-import { hashPassword, randomId, createJWT } from "../auth";
-import type { Env } from "../types";
+import { hashPassword, randomId, createJWT, verifyPassword } from "../auth";
+import { authMiddleware } from "../middleware";
+import type { Env, JWTPayload } from "../types";
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: { user: JWTPayload } }>();
 
 app.post("/register", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { email?: string; password?: string };
@@ -73,6 +74,39 @@ app.post("/login", async (c) => {
   if (!secret) return c.json({ error: "Server misconfiguration" }, 500);
   const token = await createJWT({ sub: user.id, email: user.email }, secret);
   return c.json({ token, user: { id: user.id, email: user.email } });
+});
+
+app.post("/change-password", authMiddleware(), async (c) => {
+  const user = c.get("user");
+  const body = (await c.req.json().catch(() => ({}))) as { currentPassword?: string; newPassword?: string };
+  const currentPassword = typeof body.currentPassword === "string" ? body.currentPassword : "";
+  const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+
+  if (!currentPassword || !newPassword) {
+    return c.json({ error: "Current and new password required" }, 400);
+  }
+  if (newPassword.length < 8) {
+    return c.json({ error: "New password must be at least 8 characters" }, 400);
+  }
+
+  const row = await c.env.DB.prepare(
+    "SELECT password_hash, salt FROM users WHERE id = ?"
+  )
+    .bind(user.sub)
+    .first<{ password_hash: string; salt: string }>();
+
+  if (!row) return c.json({ error: "User not found" }, 404);
+
+  const ok = await verifyPassword(currentPassword, row.password_hash, row.salt);
+  if (!ok) return c.json({ error: "Current password is incorrect" }, 401);
+
+  const newSalt = randomId();
+  const newHash = await hashPassword(newPassword, newSalt);
+  await c.env.DB.prepare("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?")
+    .bind(newHash, newSalt, user.sub)
+    .run();
+
+  return c.json({ success: true });
 });
 
 export default app;
