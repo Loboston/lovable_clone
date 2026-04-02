@@ -109,23 +109,45 @@ function render() {
         btn.onclick = () => { currentProjectId = btn.dataset.id; render(); };
       });
       list.querySelectorAll('.deleteBtn').forEach(btn => {
-        btn.onclick = async (e) => {
+        btn.onclick = (e) => {
           e.stopPropagation();
           const id = btn.dataset.id;
-          const proj = projects.find(p => p.id === id);
-          if (!confirm(\`Delete "\${proj?.name || 'this project'}"? This cannot be undone.\`)) return;
-          btn.disabled = true;
-          btn.innerHTML = '…';
-          const r = await api(\`/api/projects/\${id}\`, { method: 'DELETE' });
-          if (r.ok) {
-            projects = projects.filter(p => p.id !== id);
-            if (currentProjectId === id) currentProjectId = null;
-            render();
-          } else {
-            btn.disabled = false;
-            btn.textContent = '✕';
-            alert('Failed to delete project. Please try again.');
-          }
+          const li = btn.closest('li');
+          const projectBtn = li.querySelector('.projectBtn');
+
+          // Flip row into inline confirmation state
+          projectBtn.style.display = 'none';
+          btn.style.display = 'none';
+          const confirmEl = document.createElement('div');
+          confirmEl.className = 'flex items-center gap-1 px-2 py-1 w-full';
+          confirmEl.innerHTML = \`
+            <span class="text-xs text-slate-400 truncate flex-1">Delete?</span>
+            <button class="confirmYes px-2 py-0.5 rounded bg-red-600 hover:bg-red-700 text-xs text-white">Delete</button>
+            <button class="confirmNo px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-xs text-white">Cancel</button>
+          \`;
+          li.appendChild(confirmEl);
+
+          confirmEl.querySelector('.confirmNo').onclick = (e) => {
+            e.stopPropagation();
+            confirmEl.remove();
+            projectBtn.style.display = '';
+            btn.style.display = '';
+          };
+
+          confirmEl.querySelector('.confirmYes').onclick = async (e) => {
+            e.stopPropagation();
+            confirmEl.innerHTML = '<span class="text-xs text-slate-400 px-2">Deleting...</span>';
+            const r = await api(\`/api/projects/\${id}\`, { method: 'DELETE' });
+            if (r.ok) {
+              projects = projects.filter(p => p.id !== id);
+              if (currentProjectId === id) currentProjectId = null;
+              li.remove();
+            } else {
+              confirmEl.remove();
+              projectBtn.style.display = '';
+              btn.style.display = '';
+            }
+          };
         };
       });
     })();
