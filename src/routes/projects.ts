@@ -25,12 +25,19 @@ app.post("/", async (c) => {
         stream: false,
         max_tokens: 20,
       } as never);
-      const raw =
-        typeof out === "string"
-          ? out
-          : ((out as Record<string, unknown>)?.response as string) ??
-            ((out as Record<string, unknown>)?.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content ??
-            "";
+      let raw = "";
+      if (typeof out === "string") {
+        raw = out;
+      } else {
+        const o = out as Record<string, unknown>;
+        const content = (o?.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content;
+        if (typeof content === "string") raw = content;
+        else if (typeof o?.response === "string") raw = o.response;
+        else {
+          const result = o?.result as Record<string, unknown> | undefined;
+          if (result && typeof result.response === "string") raw = result.response;
+        }
+      }
       name = raw.trim().slice(0, 60) || desc.slice(0, 40);
     } catch {
       name = desc.slice(0, 40);
