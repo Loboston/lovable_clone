@@ -127,10 +127,13 @@ function renderSidebar() {
       if (!ul) return;
       (data.messages || []).forEach(m => {
         const li = document.createElement('li');
-        li.className = m.role === 'user'
-          ? 'text-right text-slate-100'
-          : 'text-left text-slate-300';
-        li.textContent = m.content?.slice(0, 300) + (m.content?.length > 300 ? '...' : '');
+        li.className = m.role === 'user' ? 'flex justify-end' : 'flex justify-start';
+        const histBubble = document.createElement('div');
+        histBubble.className = m.role === 'user'
+          ? 'bg-blue-600 text-white px-3 py-2 rounded-2xl rounded-tr-sm max-w-[85%] text-sm'
+          : 'bg-slate-700 text-slate-100 px-3 py-2 rounded-2xl rounded-tl-sm max-w-[85%] text-sm';
+        histBubble.textContent = m.content?.slice(0, 300) + (m.content?.length > 300 ? '...' : '');
+        li.appendChild(histBubble);
         ul.appendChild(li);
         if (m.created_at) lastMessageAt = m.created_at;
       });
@@ -152,8 +155,11 @@ function renderSidebar() {
       const capturedProjectId = currentProjectId;
 
       const userLi = document.createElement('li');
-      userLi.className = 'text-right text-slate-100';
-      userLi.textContent = text;
+      userLi.className = 'flex justify-end';
+      const userBubble = document.createElement('div');
+      userBubble.className = 'bg-blue-600 text-white px-3 py-2 rounded-2xl rounded-tr-sm max-w-[85%] text-sm';
+      userBubble.textContent = text;
+      userLi.appendChild(userBubble);
       ul.appendChild(userLi);
       chatInput.value = '';
       sendBtn.disabled = true;
@@ -207,8 +213,11 @@ function renderSidebar() {
               if (m.role === 'assistant') {
                 removeThinking();
                 const li = document.createElement('li');
-                li.className = 'text-left text-slate-300';
-                li.textContent = m.content?.slice(0, 500) + (m.content?.length > 500 ? '...' : '');
+                li.className = 'flex justify-start';
+                const asstBubble = document.createElement('div');
+                asstBubble.className = 'bg-slate-700 text-slate-100 px-3 py-2 rounded-2xl rounded-tl-sm max-w-[85%] text-sm';
+                asstBubble.textContent = m.content?.slice(0, 500) + (m.content?.length > 500 ? '...' : '');
+                li.appendChild(asstBubble);
                 ul.appendChild(li);
                 lastMessageAt = m.created_at;
                 gotNew = true;
@@ -255,8 +264,8 @@ function renderSidebar() {
                 const frame = document.getElementById('previewFrame');
                 if (frame) frame.src = deployedUrl;
                 const doneLi = document.createElement('li');
-                doneLi.className = 'text-left text-slate-300';
-                doneLi.innerHTML = \`App deployed! <a href="\${deployedUrl}" target="_blank" class="text-blue-400 underline">Open it here</a>\`;
+                doneLi.className = 'flex justify-start';
+                doneLi.innerHTML = \`<div class="bg-slate-700 text-slate-100 px-3 py-2 rounded-2xl rounded-tl-sm max-w-[85%] text-sm">App deployed! <a href="\${deployedUrl}" target="_blank" class="text-blue-300 underline">Open it here</a></div>\`;
                 ul.appendChild(doneLi);
               }
               break;
