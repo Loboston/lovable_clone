@@ -264,10 +264,6 @@ function renderSidebar() {
                 }
                 const frame = document.getElementById('previewFrame');
                 if (frame) frame.src = deployedUrl;
-                const doneLi = document.createElement('li');
-                doneLi.className = 'flex justify-start';
-                doneLi.innerHTML = \`<div class="bg-slate-700 text-slate-100 px-3 py-2 rounded-2xl rounded-tl-sm max-w-[85%] text-sm">App deployed! <a href="\${deployedUrl}" target="_blank" class="text-blue-300 underline">Open it here</a></div>\`;
-                ul.appendChild(doneLi);
               }
             } else if (msg.status === 'error') {
               const statusEl = document.getElementById('projectStatus');
@@ -504,17 +500,72 @@ function renderMain() {
     return;
   }
 
-  // Project view — full-width preview with thin status bar
+  // Project view — full-width preview with status bar + deploy dropdown
   const proj = projects.find(p => p.id === currentProjectId) || { name: 'Project', status: '', deployed_url: '' };
   main.innerHTML = \`
     <div class="flex flex-col h-full">
       <div id="statusBar" class="shrink-0 px-4 py-2 border-b border-slate-700 flex items-center gap-3 text-sm">
         <span id="projectStatus" class="text-slate-400">\${proj.status || 'draft'}</span>
-        \${proj.deployed_url ? \`<a id="openAppLink" href="\${proj.deployed_url}" target="_blank" class="text-blue-400 hover:underline ml-auto">Open app ↗</a>\` : ''}
+        <div class="ml-auto flex items-center gap-3">
+          \${proj.deployed_url ? \`<a id="openAppLink" href="\${proj.deployed_url}" target="_blank" class="text-xs text-blue-400 hover:underline">Open app ↗</a>\` : ''}
+          <div class="relative">
+            <button id="deployMenuBtn" class="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold transition-colors">Deploy? <span class="opacity-60">▾</span></button>
+            <div id="deployMenu" class="hidden absolute right-0 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 overflow-hidden text-xs min-w-[7rem]">
+              <button id="deployYes" class="w-full text-left px-4 py-2.5 hover:bg-slate-700 text-emerald-400 font-medium">Yes, deploy</button>
+              <button id="deployNo" class="w-full text-left px-4 py-2.5 hover:bg-slate-700 text-slate-400">No</button>
+            </div>
+          </div>
+        </div>
       </div>
       <iframe id="previewFrame" class="flex-1 w-full border-0" src="\${proj.deployed_url || 'about:blank'}" title="Preview"></iframe>
     </div>
   \`;
+
+  const deployMenuBtn = document.getElementById('deployMenuBtn');
+  const deployMenu = document.getElementById('deployMenu');
+
+  deployMenuBtn.onclick = (e) => {
+    e.stopPropagation();
+    deployMenu.classList.toggle('hidden');
+  };
+  document.addEventListener('click', () => deployMenu.classList.add('hidden'), { once: true });
+
+  document.getElementById('deployNo').onclick = () => deployMenu.classList.add('hidden');
+
+  document.getElementById('deployYes').onclick = async () => {
+    deployMenu.classList.add('hidden');
+    const projId = currentProjectId;
+    deployMenuBtn.disabled = true;
+    deployMenuBtn.innerHTML = 'Building... <span class="opacity-60">▾</span>';
+    const statusEl = document.getElementById('projectStatus');
+    if (statusEl) statusEl.textContent = 'building';
+
+    try {
+      await api(\`/api/projects/\${projId}/build\`, { method: 'POST' });
+      // Poll until done
+      for (let i = 0; i < 90; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        if (currentProjectId !== projId) break;
+        const d = await (await api(\`/api/projects/\${projId}\`)).json();
+        const s = d.project?.status;
+        if (statusEl) statusEl.textContent = s || 'building';
+        if (s === 'deployed' || s === 'error') {
+          if (s === 'deployed' && d.project?.deployed_url) {
+            const p = projects.find(x => x.id === projId);
+            if (p) { p.status = 'deployed'; p.deployed_url = d.project.deployed_url; }
+            const frame = document.getElementById('previewFrame');
+            if (frame) frame.src = d.project.deployed_url;
+            const existingLink = document.getElementById('openAppLink');
+            if (existingLink) existingLink.href = d.project.deployed_url;
+          }
+          break;
+        }
+      }
+    } finally {
+      deployMenuBtn.disabled = false;
+      deployMenuBtn.innerHTML = 'Deploy? <span class="opacity-60">▾</span>';
+    }
+  };
 }
 
 render();

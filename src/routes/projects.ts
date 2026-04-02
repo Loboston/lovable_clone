@@ -35,10 +35,14 @@ app.post("/", async (c) => {
           ],
         }),
       });
+      if (!res.ok) throw new Error(`Anthropic ${res.status}`);
       const data = await res.json() as { content?: Array<{ text?: string }> };
-      const generated = data.content?.[0]?.text?.trim() ?? "";
-      name = generated.slice(0, 60) || desc.slice(0, 40);
-    } catch {
+      const generated = (data.content?.[0]?.text?.trim() ?? "").replace(/^["']+|["']+$/g, "");
+      if (!generated) throw new Error("empty response");
+      name = generated.slice(0, 60);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("Project name generation failed:", errMsg);
       name = desc.slice(0, 40);
     }
   } else if (typeof body.name === "string" && body.name.trim()) {
