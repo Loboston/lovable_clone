@@ -199,17 +199,35 @@ function renderSidebar() {
         const progressEls = [];
         const abortCtrl = new AbortController();
         let lastEvAt = lastEventAt;
+        let progressBox = null;
+        let progressList = null;
+        let lastProgressItem = null;
 
         const handleMsg = async (msg) => {
           if (currentProjectId !== capturedProjectId) { abortCtrl.abort(); return; }
 
           if (msg.type === 'event') {
             removeThinking();
-            const li = document.createElement('li');
-            li.className = 'text-left text-slate-500 text-xs italic';
-            li.textContent = msg.message;
-            ul.appendChild(li);
-            progressEls.push(li);
+
+            if (!progressBox) {
+              progressBox = document.createElement('li');
+              progressBox.className = 'flex justify-start w-full';
+              progressBox.innerHTML = \`<div class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 w-full max-w-[85%]"><ul class="progress-steps space-y-1 text-xs"></ul></div>\`;
+              ul.appendChild(progressBox);
+              progressList = progressBox.querySelector('.progress-steps');
+              progressEls.push(progressBox);
+            }
+
+            if (lastProgressItem) {
+              lastProgressItem.innerHTML = \`<span class="text-slate-500 mr-1.5">✓</span><span class="text-slate-500">\${lastProgressItem.dataset.msg}</span>\`;
+            }
+
+            lastProgressItem = document.createElement('li');
+            lastProgressItem.className = 'flex items-start';
+            lastProgressItem.dataset.msg = msg.message;
+            lastProgressItem.innerHTML = \`<span class="text-emerald-400 mr-1.5 shrink-0">→</span><span class="text-slate-200">\${msg.message}</span>\`;
+            progressList.appendChild(lastProgressItem);
+
             lastEvAt = msg.created_at;
             lastEventAt = msg.created_at;
             ul.scrollTop = ul.scrollHeight;
@@ -221,6 +239,9 @@ function renderSidebar() {
 
           if (msg.type === 'status') {
             abortCtrl.abort();
+            if (lastProgressItem) {
+              lastProgressItem.innerHTML = \`<span class="text-slate-500 mr-1.5">✓</span><span class="text-slate-500">\${lastProgressItem.dataset.msg}</span>\`;
+            }
             progressEls.forEach(el => el.remove());
 
             if (msg.status === 'deployed') {
