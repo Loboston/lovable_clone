@@ -68,7 +68,7 @@ function render() {
   if (!document.getElementById('appShell')) {
     root.innerHTML = \`
       <div id="appShell" class="flex h-screen overflow-hidden">
-        <aside id="sidebar" class="w-64 border-r border-slate-700 flex flex-col shrink-0 overflow-hidden"></aside>
+        <aside id="sidebar" class="w-[32rem] border-r border-slate-700 flex flex-col shrink-0 overflow-hidden"></aside>
         <div id="mainContent" class="flex-1 overflow-hidden flex flex-col"></div>
       </div>
     \`;
