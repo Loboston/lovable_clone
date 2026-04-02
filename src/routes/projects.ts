@@ -9,10 +9,35 @@ const app = new Hono<{ Bindings: Env; Variables: { user: { sub: string; email: s
 app.use("/*", authMiddleware());
 
 app.post("/", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { name?: string };
-  const name = typeof body.name === "string" ? body.name.trim() : "Untitled Project";
+  const body = (await c.req.json().catch(() => ({}))) as { name?: string; description?: string };
   const user = c.get("user");
   const id = randomId();
+
+  let name = "Untitled Project";
+  if (typeof body.description === "string" && body.description.trim()) {
+    const desc = body.description.trim();
+    try {
+      const out = await c.env.AI.run("@cf/zai-org/glm-4.7-flash" as never, {
+        messages: [
+          { role: "system", content: "Generate a short 3-6 word project name from the user's app description. Output only the name, no quotes, no punctuation, no explanation." },
+          { role: "user", content: desc },
+        ],
+        stream: false,
+        max_tokens: 20,
+      } as never);
+      const raw =
+        typeof out === "string"
+          ? out
+          : ((out as Record<string, unknown>)?.response as string) ??
+            ((out as Record<string, unknown>)?.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content ??
+            "";
+      name = raw.trim().slice(0, 60) || desc.slice(0, 40);
+    } catch {
+      name = desc.slice(0, 40);
+    }
+  } else if (typeof body.name === "string" && body.name.trim()) {
+    name = body.name.trim();
+  }
 
   await c.env.DB.prepare(
     "INSERT INTO projects (id, user_id, name) VALUES (?, ?, ?)"

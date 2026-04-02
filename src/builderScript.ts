@@ -460,13 +460,15 @@ function renderMain() {
   if (!currentProjectId) {
     main.innerHTML = \`
       <div class="flex-1 flex items-center justify-center h-full">
-        <div class="w-full max-w-xl px-6 space-y-4">
-          <h2 class="text-2xl font-bold text-center">What do you want to build?</h2>
-          <div class="relative">
-            <textarea id="homePrompt" rows="3" class="w-full px-4 py-3 rounded-lg bg-slate-800 border border-slate-600 resize-none focus:outline-none focus:border-slate-400 text-sm" placeholder="Describe your app idea..."></textarea>
-            <button id="homeBuildBtn" class="absolute bottom-3 right-3 px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-sm font-medium">Build</button>
+        <div class="w-full max-w-2xl px-6 space-y-5">
+          <h2 class="text-3xl font-bold text-center tracking-tight">What do you want to build?</h2>
+          <div class="bg-slate-800 border border-slate-700 rounded-2xl shadow-lg focus-within:border-slate-500 transition-colors">
+            <textarea id="homePrompt" rows="3" class="w-full bg-transparent px-5 pt-4 pb-2 resize-none text-sm focus:outline-none placeholder-slate-500" placeholder="Describe your app idea..."></textarea>
+            <div class="flex justify-end px-4 pb-3">
+              <button id="homeBuildBtn" class="px-5 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-sm font-semibold transition-colors">Build</button>
+            </div>
           </div>
-          <p class="text-xs text-slate-500 text-center">Press Enter or click Build to create your app</p>
+          <p class="text-xs text-slate-500 text-center">Press Enter or click Build</p>
         </div>
       </div>
     \`;
@@ -479,8 +481,7 @@ function renderMain() {
       if (!text) return;
       homeBuildBtn.disabled = true;
       homeBuildBtn.textContent = 'Creating...';
-      const name = text.length > 40 ? text.slice(0, 40).trimEnd() + '...' : text;
-      const r = await api('/api/projects', { method: 'POST', body: { name } });
+      const r = await api('/api/projects', { method: 'POST', body: { description: text } });
       const data = await r.json();
       if (!r.ok) { homeBuildBtn.disabled = false; homeBuildBtn.textContent = 'Build'; return; }
       projects.unshift(data.project);
