@@ -26,6 +26,7 @@ let currentProjectId = null;
 let projects = [];
 let lastMessageAt = '';
 let lastEventAt = '';
+let projectsCollapsed = false;
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
 // Created once after login. renderSidebar/renderMain swap content independently.
@@ -249,25 +250,14 @@ function renderSidebar() {
               if (deployedUrl) {
                 const p = projects.find(x => x.id === capturedProjectId);
                 if (p) { p.status = 'deployed'; p.deployed_url = deployedUrl; }
-                const statusEl = document.getElementById('projectStatus');
-                if (statusEl) statusEl.textContent = 'deployed';
-                const existingLink = document.getElementById('openAppLink');
-                if (existingLink) { existingLink.href = deployedUrl; }
-                else {
-                  const statusBar = document.getElementById('statusBar');
-                  if (statusBar) {
-                    const link = document.createElement('a');
-                    link.id = 'openAppLink'; link.href = deployedUrl; link.target = '_blank';
-                    link.className = 'text-blue-400 hover:underline ml-auto'; link.textContent = 'Open app ↗';
-                    statusBar.appendChild(link);
-                  }
+                const statusBar = document.getElementById('statusBar');
+                if (statusBar) {
+                  statusBar.innerHTML = \`<a id="openAppLink" href="\${deployedUrl}" target="_blank" class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold text-emerald-100 transition-colors"><span class="inline-block w-2 h-2 rounded-full bg-emerald-300"></span>Deployed — Open app ↗</a>\`;
                 }
                 const frame = document.getElementById('previewFrame');
                 if (frame) frame.src = deployedUrl;
               }
             } else if (msg.status === 'error') {
-              const statusEl = document.getElementById('projectStatus');
-              if (statusEl) statusEl.textContent = 'error';
               const errLi = document.createElement('li');
               errLi.className = 'text-left text-red-400';
               errLi.textContent = 'Build failed. Check messages above.';
@@ -344,10 +334,11 @@ function renderSidebar() {
           <h1 class="text-lg font-bold">App Builder</h1>
           <button id="logoutBtn" class="text-sm text-slate-400 hover:text-white">Logout</button>
         </div>
-        <div class="p-3 pb-2 shrink-0">
-          <button id="newProjectBtn" class="w-full px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-700 text-sm">New project</button>
-        </div>
-        <ul id="projectList" class="flex-1 overflow-auto space-y-1 px-3 pr-0 text-sm"></ul>
+        <button id="projectsToggleBtn" class="shrink-0 flex items-center justify-between w-full px-4 py-2.5 text-xs font-semibold uppercase tracking-widest text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors">
+          <span>Projects</span>
+          <svg id="projectsChevron" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform \${projectsCollapsed ? '-rotate-90' : ''}"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+        <ul id="projectList" class="flex-1 overflow-auto space-y-1 px-3 pr-0 text-sm \${projectsCollapsed ? 'hidden' : ''}"></ul>
       </div>
     \`;
 
@@ -357,18 +348,12 @@ function renderSidebar() {
       render();
     };
 
-    document.getElementById('newProjectBtn').onclick = async () => {
-      const name = prompt('Project name', 'My App') || 'My App';
-      const r = await api('/api/projects', { method: 'POST', body: { name } });
-      const data = await r.json();
-      if (r.ok) {
-        projects.unshift(data.project);
-        currentProjectId = data.project.id;
-        lastMessageAt = '';
-        lastEventAt = '';
-        renderSidebar();
-        renderMain();
-      }
+    document.getElementById('projectsToggleBtn').onclick = () => {
+      projectsCollapsed = !projectsCollapsed;
+      const list = document.getElementById('projectList');
+      const chevron = document.getElementById('projectsChevron');
+      if (list) list.classList.toggle('hidden', projectsCollapsed);
+      if (chevron) chevron.classList.toggle('-rotate-90', projectsCollapsed);
     };
 
     renderProjectList();
@@ -502,70 +487,85 @@ function renderMain() {
 
   // Project view — full-width preview with status bar + deploy dropdown
   const proj = projects.find(p => p.id === currentProjectId) || { name: 'Project', status: '', deployed_url: '' };
+  const isDeployed = proj.status === 'deployed' && !!proj.deployed_url;
   main.innerHTML = \`
     <div class="flex flex-col h-full">
-      <div id="statusBar" class="shrink-0 px-4 py-2 border-b border-slate-700 flex items-center gap-3 text-sm">
-        <span id="projectStatus" class="text-slate-400">\${proj.status || 'draft'}</span>
-        <div class="ml-auto flex items-center gap-3">
-          \${proj.deployed_url ? \`<a id="openAppLink" href="\${proj.deployed_url}" target="_blank" class="text-xs text-blue-400 hover:underline">Open app ↗</a>\` : ''}
+      <div id="statusBar" class="shrink-0 px-4 py-2 border-b border-slate-700 flex items-center justify-center gap-3 text-sm">
+        \${isDeployed ? \`
+          <a id="openAppLink" href="\${proj.deployed_url}" target="_blank" class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold text-emerald-100 transition-colors">
+            <span class="inline-block w-2 h-2 rounded-full bg-emerald-300"></span>Deployed — Open app ↗
+          </a>
+        \` : \`
           <div class="relative">
-            <button id="deployMenuBtn" class="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold transition-colors">Deploy? <span class="opacity-60">▾</span></button>
-            <div id="deployMenu" class="hidden absolute right-0 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 overflow-hidden text-xs min-w-[7rem]">
-              <button id="deployYes" class="w-full text-left px-4 py-2.5 hover:bg-slate-700 text-emerald-400 font-medium">Yes, deploy</button>
-              <button id="deployNo" class="w-full text-left px-4 py-2.5 hover:bg-slate-700 text-slate-400">No</button>
+            <button id="deployMenuBtn" class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-700 hover:bg-slate-600 text-xs font-semibold text-slate-300 transition-colors">
+              <span id="deployBtnDot" class="inline-block w-2 h-2 rounded-full bg-slate-500"></span>
+              <span id="deployBtnLabel">Not Deployed</span> <span class="opacity-60">▾</span>
+            </button>
+            <div id="deployMenu" class="hidden absolute left-1/2 -translate-x-1/2 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 overflow-hidden text-xs min-w-[8rem]">
+              <button id="deployYes" class="w-full text-left px-4 py-2.5 hover:bg-slate-700 text-emerald-400 font-medium">Deploy now</button>
+              <button id="deployNo" class="w-full text-left px-4 py-2.5 hover:bg-slate-700 text-slate-400">Cancel</button>
             </div>
           </div>
-        </div>
+        \`}
       </div>
       <iframe id="previewFrame" class="flex-1 w-full border-0" src="\${proj.deployed_url || 'about:blank'}" title="Preview"></iframe>
     </div>
   \`;
 
-  const deployMenuBtn = document.getElementById('deployMenuBtn');
-  const deployMenu = document.getElementById('deployMenu');
+  if (!isDeployed) {
+    const deployMenuBtn = document.getElementById('deployMenuBtn');
+    const deployMenu = document.getElementById('deployMenu');
 
-  deployMenuBtn.onclick = (e) => {
-    e.stopPropagation();
-    deployMenu.classList.toggle('hidden');
-  };
-  document.addEventListener('click', () => deployMenu.classList.add('hidden'), { once: true });
+    deployMenuBtn.onclick = (e) => {
+      e.stopPropagation();
+      deployMenu.classList.toggle('hidden');
+    };
+    document.addEventListener('click', () => deployMenu.classList.add('hidden'), { once: true });
 
-  document.getElementById('deployNo').onclick = () => deployMenu.classList.add('hidden');
+    document.getElementById('deployNo').onclick = () => deployMenu.classList.add('hidden');
 
-  document.getElementById('deployYes').onclick = async () => {
-    deployMenu.classList.add('hidden');
-    const projId = currentProjectId;
-    deployMenuBtn.disabled = true;
-    deployMenuBtn.innerHTML = 'Building... <span class="opacity-60">▾</span>';
-    const statusEl = document.getElementById('projectStatus');
-    if (statusEl) statusEl.textContent = 'building';
+    document.getElementById('deployYes').onclick = async () => {
+      deployMenu.classList.add('hidden');
+      const projId = currentProjectId;
+      deployMenuBtn.disabled = true;
+      const dot = document.getElementById('deployBtnDot');
+      const label = document.getElementById('deployBtnLabel');
+      if (dot) dot.className = 'inline-block w-2 h-2 rounded-full bg-yellow-400 animate-pulse';
+      if (label) label.textContent = 'Building...';
 
-    try {
-      await api(\`/api/projects/\${projId}/build\`, { method: 'POST' });
-      // Poll until done
-      for (let i = 0; i < 90; i++) {
-        await new Promise(r => setTimeout(r, 2000));
-        if (currentProjectId !== projId) break;
-        const d = await (await api(\`/api/projects/\${projId}\`)).json();
-        const s = d.project?.status;
-        if (statusEl) statusEl.textContent = s || 'building';
-        if (s === 'deployed' || s === 'error') {
-          if (s === 'deployed' && d.project?.deployed_url) {
-            const p = projects.find(x => x.id === projId);
-            if (p) { p.status = 'deployed'; p.deployed_url = d.project.deployed_url; }
-            const frame = document.getElementById('previewFrame');
-            if (frame) frame.src = d.project.deployed_url;
-            const existingLink = document.getElementById('openAppLink');
-            if (existingLink) existingLink.href = d.project.deployed_url;
+      try {
+        await api(\`/api/projects/\${projId}/build\`, { method: 'POST' });
+        for (let i = 0; i < 90; i++) {
+          await new Promise(r => setTimeout(r, 2000));
+          if (currentProjectId !== projId) break;
+          const d = await (await api(\`/api/projects/\${projId}\`)).json();
+          const s = d.project?.status;
+          if (s === 'deployed' || s === 'error') {
+            if (s === 'deployed' && d.project?.deployed_url) {
+              const p = projects.find(x => x.id === projId);
+              if (p) { p.status = 'deployed'; p.deployed_url = d.project.deployed_url; }
+              // Swap button to green deployed pill
+              const statusBar = document.getElementById('statusBar');
+              if (statusBar) {
+                statusBar.innerHTML = \`<a id="openAppLink" href="\${d.project.deployed_url}" target="_blank" class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold text-emerald-100 transition-colors"><span class="inline-block w-2 h-2 rounded-full bg-emerald-300"></span>Deployed — Open app ↗</a>\`;
+              }
+              const frame = document.getElementById('previewFrame');
+              if (frame) frame.src = d.project.deployed_url;
+            } else {
+              deployMenuBtn.disabled = false;
+              if (dot) dot.className = 'inline-block w-2 h-2 rounded-full bg-red-400';
+              if (label) label.textContent = 'Not Deployed';
+            }
+            break;
           }
-          break;
         }
+      } catch {
+        deployMenuBtn.disabled = false;
+        if (dot) dot.className = 'inline-block w-2 h-2 rounded-full bg-slate-500';
+        if (label) label.textContent = 'Not Deployed';
       }
-    } finally {
-      deployMenuBtn.disabled = false;
-      deployMenuBtn.innerHTML = 'Deploy? <span class="opacity-60">▾</span>';
-    }
-  };
+    };
+  }
 }
 
 render();
