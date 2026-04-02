@@ -105,6 +105,78 @@ app.get("/:id/events", async (c) => {
   return c.json({ events: results, status: project.status });
 });
 
+app.get("/:id/stream", async (c) => {
+  const id = c.req.param("id");
+  const user = c.get("user");
+  const since = c.req.query("since") ?? "";
+
+  const project = await c.env.DB.prepare(
+    "SELECT id, status FROM projects WHERE id = ? AND user_id = ?"
+  )
+    .bind(id, user.sub)
+    .first<{ id: string; status: string }>();
+
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const enc = new TextEncoder();
+  const send = (data: unknown) =>
+    writer.write(enc.encode(`data: ${JSON.stringify(data)}\n\n`));
+
+  (async () => {
+    let lastAt = since;
+    const deadline = Date.now() + 25_000;
+    try {
+      while (Date.now() < deadline) {
+        await new Promise<void>((r) => setTimeout(r, 1000));
+
+        const { results } = lastAt
+          ? await c.env.DB.prepare(
+              "SELECT message, created_at FROM build_events WHERE project_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 50"
+            )
+              .bind(id, lastAt)
+              .all()
+          : await c.env.DB.prepare(
+              "SELECT message, created_at FROM build_events WHERE project_id = ? ORDER BY created_at ASC LIMIT 50"
+            )
+              .bind(id)
+              .all();
+
+        for (const ev of results as { message: string; created_at: string }[]) {
+          await send({ type: "event", message: ev.message, created_at: ev.created_at });
+          lastAt = ev.created_at;
+        }
+
+        const proj = await c.env.DB.prepare(
+          "SELECT status, deployed_url FROM projects WHERE id = ?"
+        )
+          .bind(id)
+          .first<{ status: string; deployed_url: string | null }>();
+
+        if (proj?.status === "deployed" || proj?.status === "error") {
+          await send({ type: "status", status: proj.status, deployed_url: proj.deployed_url ?? null });
+          break;
+        }
+
+        await send({ type: "heartbeat", lastAt });
+      }
+    } catch (_) {
+      // client disconnected
+    } finally {
+      writer.close();
+    }
+  })();
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "X-Accel-Buffering": "no",
+    },
+  });
+});
+
 app.get("/:id/files", async (c) => {
   const id = c.req.param("id");
   const user = c.get("user");

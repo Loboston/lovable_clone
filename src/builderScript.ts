@@ -196,58 +196,38 @@ function renderSidebar() {
           return;
         }
 
-        let stableCount = 0;
-        const MAX_POLL = 90;
         const progressEls = [];
+        const abortCtrl = new AbortController();
+        let lastEvAt = lastEventAt;
 
-        for (let i = 0; i < MAX_POLL; i++) {
-          await new Promise(r => setTimeout(r, 2000));
-          // Stop polling if user switched projects
-          if (currentProjectId !== capturedProjectId) break;
-          let gotNew = false;
+        const handleMsg = async (msg) => {
+          if (currentProjectId !== capturedProjectId) { abortCtrl.abort(); return; }
 
-          try {
-            const msgUrl = \`/api/chat/\${capturedProjectId}/history?since=\${encodeURIComponent(lastMessageAt)}\`;
-            const msgData = await (await api(msgUrl)).json();
-            for (const m of (msgData.messages || [])) {
-              if (m.role === 'assistant') {
-                removeThinking();
-                const li = document.createElement('li');
-                li.className = 'flex justify-start';
-                const asstBubble = document.createElement('div');
-                asstBubble.className = 'bg-slate-700 text-slate-100 px-3 py-2 rounded-2xl rounded-tl-sm max-w-[85%] text-sm';
-                asstBubble.textContent = m.content?.slice(0, 500) + (m.content?.length > 500 ? '...' : '');
-                li.appendChild(asstBubble);
-                ul.appendChild(li);
-                lastMessageAt = m.created_at;
-                gotNew = true;
-              }
-            }
-
-            const evUrl = \`/api/projects/\${capturedProjectId}/events\` + (lastEventAt ? \`?since=\${encodeURIComponent(lastEventAt)}\` : '');
-            const evData = await (await api(evUrl)).json();
-            for (const ev of (evData.events || [])) {
-              removeThinking();
-              const li = document.createElement('li');
-              li.className = 'text-left text-slate-500 text-xs italic';
-              li.textContent = ev.message;
-              ul.appendChild(li);
-              progressEls.push(li);
-              lastEventAt = ev.created_at;
-              gotNew = true;
-            }
-
-            const status = evData.status;
+          if (msg.type === 'event') {
+            removeThinking();
+            const li = document.createElement('li');
+            li.className = 'text-left text-slate-500 text-xs italic';
+            li.textContent = msg.message;
+            ul.appendChild(li);
+            progressEls.push(li);
+            lastEvAt = msg.created_at;
+            lastEventAt = msg.created_at;
             ul.scrollTop = ul.scrollHeight;
+          }
 
-            if (status === 'deployed') {
-              progressEls.forEach(el => el.remove());
-              const projData = await (await api(\`/api/projects/\${capturedProjectId}\`)).json();
-              const deployedUrl = projData.project?.deployed_url;
+          if (msg.type === 'heartbeat' && msg.lastAt) {
+            lastEvAt = msg.lastAt;
+          }
+
+          if (msg.type === 'status') {
+            abortCtrl.abort();
+            progressEls.forEach(el => el.remove());
+
+            if (msg.status === 'deployed') {
+              const deployedUrl = msg.deployed_url;
               if (deployedUrl) {
                 const p = projects.find(x => x.id === capturedProjectId);
                 if (p) { p.status = 'deployed'; p.deployed_url = deployedUrl; }
-                // Update status bar and iframe in mainContent
                 const statusEl = document.getElementById('projectStatus');
                 if (statusEl) statusEl.textContent = 'deployed';
                 const existingLink = document.getElementById('openAppLink');
@@ -268,25 +248,64 @@ function renderSidebar() {
                 doneLi.innerHTML = \`<div class="bg-slate-700 text-slate-100 px-3 py-2 rounded-2xl rounded-tl-sm max-w-[85%] text-sm">App deployed! <a href="\${deployedUrl}" target="_blank" class="text-blue-300 underline">Open it here</a></div>\`;
                 ul.appendChild(doneLi);
               }
-              break;
-            }
-
-            if (status === 'error') {
-              progressEls.forEach(el => el.remove());
+            } else if (msg.status === 'error') {
               const statusEl = document.getElementById('projectStatus');
               if (statusEl) statusEl.textContent = 'error';
               const errLi = document.createElement('li');
               errLi.className = 'text-left text-red-400';
               errLi.textContent = 'Build failed. Check messages above.';
               ul.appendChild(errLi);
-              break;
             }
 
-            if (status !== 'thinking' && status !== 'building') {
-              if (!gotNew) { stableCount++; if (stableCount >= 3) break; }
-              else stableCount = 0;
+            removeThinking();
+
+            // Fetch assistant message(s) saved after build
+            try {
+              const msgData = await (await api(\`/api/chat/\${capturedProjectId}/history?since=\${encodeURIComponent(lastMessageAt)}\`)).json();
+              for (const m of (msgData.messages || [])) {
+                if (m.role === 'assistant') {
+                  const li = document.createElement('li');
+                  li.className = 'flex justify-start';
+                  const bubble = document.createElement('div');
+                  bubble.className = 'bg-slate-700 text-slate-100 px-3 py-2 rounded-2xl rounded-tl-sm max-w-[85%] text-sm';
+                  bubble.textContent = m.content?.slice(0, 500) + (m.content?.length > 500 ? '...' : '');
+                  li.appendChild(bubble);
+                  ul.appendChild(li);
+                  lastMessageAt = m.created_at;
+                }
+              }
+            } catch (_) {}
+            ul.scrollTop = ul.scrollHeight;
+          }
+        };
+
+        // Stream build events, reconnect if stream closes before terminal status
+        while (!abortCtrl.signal.aborted) {
+          try {
+            const streamRes = await fetch(
+              \`/api/projects/\${capturedProjectId}/stream?since=\${encodeURIComponent(lastEvAt)}\`,
+              { headers: { Authorization: 'Bearer ' + getToken() }, signal: abortCtrl.signal }
+            );
+            if (!streamRes.ok || !streamRes.body) break;
+
+            const reader = streamRes.body.getReader();
+            const dec = new TextDecoder();
+            let buf = '';
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += dec.decode(value, { stream: true });
+              const lines = buf.split('\n');
+              buf = lines.pop();
+              for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try { await handleMsg(JSON.parse(line.slice(6))); } catch (_) {}
+              }
             }
-          } catch (_) { /* network hiccup — retry */ }
+          } catch (e) {
+            if (abortCtrl.signal.aborted) break;
+            await new Promise(r => setTimeout(r, 1500)); // pause before reconnect
+          }
         }
       } catch (err) {
         const errLi = document.createElement('li');
