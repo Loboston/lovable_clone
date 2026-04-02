@@ -197,6 +197,7 @@ function render() {
         // Poll for the agent's chat responses and any build progress events
         let stableCount = 0;
         const MAX_POLL = 90; // ~3 minutes
+        const progressEls = []; // track progress elements so we can remove them when done
 
         for (let i = 0; i < MAX_POLL; i++) {
           await new Promise(r => setTimeout(r, 2000));
@@ -219,7 +220,7 @@ function render() {
               }
             }
 
-            // Build progress events
+            // Build progress events — tracked so they can be removed when done
             const evUrl = \`/api/projects/\${currentProjectId}/events\` + (lastEventAt ? \`?since=\${encodeURIComponent(lastEventAt)}\` : '');
             const evRes = await api(evUrl);
             const evData = await evRes.json();
@@ -229,6 +230,7 @@ function render() {
               li.className = 'text-left text-slate-300 text-sm italic';
               li.textContent = ev.message;
               ul.appendChild(li);
+              progressEls.push(li);
               lastEventAt = ev.created_at;
               gotNew = true;
             }
@@ -237,6 +239,9 @@ function render() {
             ul.scrollTop = ul.scrollHeight;
 
             if (status === 'deployed') {
+              // Remove all progress events — they were temporary indicators
+              progressEls.forEach(el => el.remove());
+
               const projRes = await api(\`/api/projects/\${currentProjectId}\`);
               const projData = await projRes.json();
               const deployedUrl = projData.project?.deployed_url;
@@ -265,6 +270,7 @@ function render() {
             }
 
             if (status === 'error') {
+              progressEls.forEach(el => el.remove());
               const statusEl = document.getElementById('projectStatus');
               if (statusEl) statusEl.textContent = 'error';
               const errLi = document.createElement('li');
