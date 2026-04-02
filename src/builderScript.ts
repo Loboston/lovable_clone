@@ -91,9 +91,34 @@ function render() {
       const data = await r.json();
       if (r.ok) projects = data.projects || [];
       const list = document.getElementById('projectList');
-      list.innerHTML = projects.map(p => \`<li><button class="projectBtn w-full text-left px-2 py-1 rounded hover:bg-slate-800" data-id="\${p.id}">\${p.name}</button></li>\`).join('');
+      list.innerHTML = projects.map(p => \`
+        <li class="flex items-center gap-1 group">
+          <button class="projectBtn flex-1 text-left px-2 py-1 rounded hover:bg-slate-800 truncate" data-id="\${p.id}">\${p.name}</button>
+          <button class="deleteBtn px-1.5 py-1 rounded text-slate-600 hover:text-red-400 hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition-opacity text-xs" data-id="\${p.id}" title="Delete project">✕</button>
+        </li>
+      \`).join('');
       list.querySelectorAll('.projectBtn').forEach(btn => {
         btn.onclick = () => { currentProjectId = btn.dataset.id; render(); };
+      });
+      list.querySelectorAll('.deleteBtn').forEach(btn => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          const id = btn.dataset.id;
+          const proj = projects.find(p => p.id === id);
+          if (!confirm(\`Delete "\${proj?.name || 'this project'}"? This cannot be undone.\`)) return;
+          btn.disabled = true;
+          btn.textContent = '…';
+          const r = await api(\`/api/projects/\${id}\`, { method: 'DELETE' });
+          if (r.ok) {
+            projects = projects.filter(p => p.id !== id);
+            if (currentProjectId === id) currentProjectId = null;
+            render();
+          } else {
+            btn.disabled = false;
+            btn.textContent = '✕';
+            alert('Failed to delete project. Please try again.');
+          }
+        };
       });
     })();
     return;
