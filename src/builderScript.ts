@@ -27,6 +27,7 @@ let projects = [];
 let lastMessageAt = '';
 let lastEventAt = '';
 let projectsCollapsed = false;
+let userName = localStorage.getItem('userName') || '';
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
 // Created once after login. renderSidebar/renderMain swap content independently.
@@ -330,9 +331,19 @@ function renderSidebar() {
     // Home sidebar — project list
     sidebar.innerHTML = \`
       <div class="flex flex-col h-full">
-        <div class="p-4 border-b border-slate-700 flex justify-between items-center shrink-0">
+        <div class="px-4 py-3 border-b border-slate-700 flex justify-between items-center shrink-0">
           <h1 class="text-lg font-bold">App Builder</h1>
-          <button id="logoutBtn" class="text-sm text-slate-400 hover:text-white">Logout</button>
+          <div class="flex items-center gap-2">
+            <button id="settingsBtn" title="Settings" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-700 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            </button>
+            <button id="logoutBtn" class="text-sm text-slate-400 hover:text-white">Logout</button>
+          </div>
+        </div>
+        <div id="settingsPanel" class="hidden shrink-0 px-4 py-3 border-b border-slate-700 bg-slate-800/50">
+          <label class="block text-xs text-slate-400 mb-1 font-medium">Your name</label>
+          <input id="userNameInput" type="text" value="\${userName}" placeholder="e.g. Ariel" maxlength="40"
+            class="w-full px-3 py-1.5 rounded bg-slate-700 border border-slate-600 text-sm focus:outline-none focus:border-slate-400" />
         </div>
         <button id="projectsToggleBtn" class="shrink-0 flex items-center justify-between w-full px-4 py-2.5 text-xs font-semibold uppercase tracking-widest text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors">
           <span>Projects</span>
@@ -346,6 +357,21 @@ function renderSidebar() {
       setToken(null); currentProjectId = null; projects = [];
       document.getElementById('root').innerHTML = '';
       render();
+    };
+
+    document.getElementById('settingsBtn').onclick = () => {
+      const panel = document.getElementById('settingsPanel');
+      panel.classList.toggle('hidden');
+      if (!panel.classList.contains('hidden')) {
+        document.getElementById('userNameInput').focus();
+      }
+    };
+
+    document.getElementById('userNameInput').oninput = (e) => {
+      userName = e.target.value.trim();
+      localStorage.setItem('userName', userName);
+      const heading = document.getElementById('welcomeHeading');
+      if (heading) heading.textContent = userName ? \`What do you want to build, \${userName}?\` : 'What do you want to build?';
     };
 
     document.getElementById('projectsToggleBtn').onclick = () => {
@@ -442,7 +468,7 @@ function renderMain() {
     main.innerHTML = \`
       <div class="flex-1 flex items-center justify-center h-full">
         <div class="w-full max-w-2xl px-6 space-y-5">
-          <h2 class="text-3xl font-bold text-center tracking-tight">What do you want to build?</h2>
+          <h2 id="welcomeHeading" class="text-3xl font-bold text-center tracking-tight">\${userName ? \`What do you want to build, \${userName}?\` : 'What do you want to build?'}</h2>
           <div class="bg-slate-800 border border-slate-700 rounded-2xl shadow-lg focus-within:border-slate-500 transition-colors">
             <textarea id="homePrompt" rows="3" class="w-full bg-transparent px-5 pt-4 pb-2 resize-none text-sm focus:outline-none placeholder-slate-500" placeholder="Describe your app idea..."></textarea>
             <div class="flex justify-end px-4 pb-3">
