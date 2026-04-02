@@ -92,9 +92,17 @@ function render() {
       if (r.ok) projects = data.projects || [];
       const list = document.getElementById('projectList');
       list.innerHTML = projects.map(p => \`
-        <li class="flex items-center gap-1 group">
-          <button class="projectBtn flex-1 text-left px-2 py-1 rounded hover:bg-slate-800 truncate" data-id="\${p.id}">\${p.name}</button>
-          <button class="deleteBtn px-1.5 py-1 rounded text-slate-600 hover:text-red-400 hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition-opacity text-xs" data-id="\${p.id}" title="Delete project">✕</button>
+        <li class="relative group">
+          <button class="projectBtn w-full text-left px-2 py-1 pr-8 rounded hover:bg-slate-800 truncate" data-id="\${p.id}">\${p.name}</button>
+          <button class="deleteBtn absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded text-slate-600 hover:text-red-400 hover:bg-slate-700 opacity-0 group-hover:opacity-100 transition-opacity" data-id="\${p.id}" title="Delete project">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6l-1 14H6L5 6"></path>
+              <path d="M10 11v6"></path>
+              <path d="M14 11v6"></path>
+              <path d="M9 6V4h6v2"></path>
+            </svg>
+          </button>
         </li>
       \`).join('');
       list.querySelectorAll('.projectBtn').forEach(btn => {
@@ -107,7 +115,7 @@ function render() {
           const proj = projects.find(p => p.id === id);
           if (!confirm(\`Delete "\${proj?.name || 'this project'}"? This cannot be undone.\`)) return;
           btn.disabled = true;
-          btn.textContent = '…';
+          btn.innerHTML = '…';
           const r = await api(\`/api/projects/\${id}\`, { method: 'DELETE' });
           if (r.ok) {
             projects = projects.filter(p => p.id !== id);
