@@ -69,7 +69,7 @@ function render() {
           <button id="logoutBtn" class="text-sm text-slate-400 hover:text-white">Logout</button>
         </header>
         <div class="flex flex-1 overflow-hidden">
-          <aside class="w-64 border-r border-slate-700 p-4 flex flex-col">
+          <aside class="w-64 border-r border-slate-700 p-4 pr-0 flex flex-col">
             <button id="newProjectBtn" class="mb-4 px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-700 text-sm">New project</button>
             <ul id="projectList" class="space-y-1 overflow-auto"></ul>
           </aside>
@@ -94,7 +94,7 @@ function render() {
       list.innerHTML = projects.map(p => \`
         <li class="relative group">
           <button class="projectBtn w-full text-left px-2 py-1 pr-8 rounded hover:bg-slate-800 truncate" data-id="\${p.id}">\${p.name}</button>
-          <button class="deleteBtn absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded text-slate-600 hover:text-red-400 hover:bg-slate-700 opacity-0 group-hover:opacity-100 transition-opacity" data-id="\${p.id}" title="Delete project">
+          <button class="deleteBtn absolute right-4 top-1/2 -translate-y-1/2 p-1 rounded text-slate-600 hover:text-red-400 hover:bg-slate-700 opacity-0 group-hover:opacity-100 transition-opacity" data-id="\${p.id}" title="Delete project">
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6l-1 14H6L5 6"></path>
