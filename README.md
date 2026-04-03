@@ -1,38 +1,66 @@
-# Lovable-style App Builder on Cloudflare
+# Cloudflare AI App Builder
 
-An AI-native app generator that runs on Cloudflare: describe an app in chat, then deploy a full-stack app (frontend + D1 + Worker backend + auth) with path-based routing.
+A Lovable-style AI app generator running entirely on Cloudflare. Describe an app in chat and the platform generates and deploys a full-stack app — frontend, Worker backend, D1 database, and auth — in minutes.
 
-## What’s included (MVP)
+## How it works
 
-- **Platform Worker (Hono)**  
-  - Auth: `POST /api/auth/register`, `POST /api/auth/login`  
-  - Chat: `POST /api/chat` (streaming), `GET /api/chat/:projectId/history`, `POST /api/chat/save-assistant`  
-  - Projects: `POST/GET /api/projects`, `GET /api/projects/:id`, `POST /api/projects/:id/build`, `GET /api/projects/:id/files`, `DELETE /api/projects/:id`  
-  - Builder UI at `/` (same Worker)  
-  - Path-based app URLs: `/apps/:projectId/` and `/apps/:projectId/*` → dispatched to the generated app Worker  
+1. Describe your app in the chat prompt
+2. The AI agent (Claude Sonnet) generates three files: `worker.js`, `index.html`, and `migration.sql`
+3. Files are stored in R2 and deployed as a live Cloudflare Worker via Workers for Platforms
+4. Iterate by chatting — the agent reads the existing files, patches what changed, and redeploys
+5. Deploy when ready using the Deploy button in the preview header
 
-- **Platform auth**  
-  - D1: `users`, `projects`, `chat_messages`  
-  - Passwords hashed with SHA-256 + salt; JWTs for sessions  
+## What the agent can build
 
-- **AI (Workers AI)**  
-  - Model: `@cf/zai-org/glm-4.7-flash`  
-  - Chat streaming; plan (JSON) + full-stack code (worker.js, index.html, migration.sql) for build  
+- CRUD apps with user auth (register, login, JWT sessions)
+- Multi-table relational data models (D1/SQLite)
+- Dashboards, trackers, admin panels, booking systems
+- Apps with multiple views and client-side routing
+- External API integrations (proxied through the Worker)
+- File storage via R2
 
-- **Build pipeline**  
-  - Create D1 DB → run migration → upload static assets → deploy Worker to dispatch namespace with D1, R2, secret, and assets bindings  
+Generated apps use: Preact + htm + Tailwind CSS (CDN) on the frontend, Cloudflare Workers + D1 + R2 on the backend. No npm dependencies — everything runs natively on the edge.
 
-- **Teardown**  
-  - Delete Worker, D1 database, and R2 objects for the project  
+## Platform architecture
 
-See [lovable-on-cloudflare-mvp.md](./lovable-on-cloudflare-mvp.md) for the full design.  
-Subdomain routing is planned later; see [docs/subdomain-routing-todo.md](./docs/subdomain-routing-todo.md).
+- **Builder UI** — served at `/`, single-page app with sidebar chat and preview iframe
+- **Platform Worker (Hono)** — API routes for auth, chat, projects, and build pipeline
+- **Claude Agent loop** — `claude-sonnet-4-6` with tool use: reads/writes files to R2, triggers deploy
+- **Cloudflare Workflows** — durable build pipeline with retries; survives timeouts
+- **Workers for Platforms** — each generated app is its own Worker in a dispatch namespace
+- **Per-app resources** — each project gets a dedicated D1 database and a shared R2 bucket for code storage
+- **SSE build events** — real-time progress stream from agent to UI during builds
+
+## API routes
+
+### Auth
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/change-password`
+
+### Projects
+- `GET /api/projects` — list user's projects
+- `POST /api/projects` — create project (AI-generates name from description)
+- `GET /api/projects/:id` — get project
+- `POST /api/projects/:id/build` — trigger build workflow
+- `GET /api/projects/:id/stream` — SSE stream of build events
+- `GET /api/projects/:id/events` — poll build events
+- `GET /api/projects/:id/files` — list R2 files for project
+- `DELETE /api/projects/:id` — delete project and all resources
+
+### Chat
+- `POST /api/chat` — send message, triggers agent workflow
+- `GET /api/chat/:projectId/history` — fetch message history
+
+### Generated apps
+- `GET /apps/:projectId/*` — dispatches to the project's deployed Worker
 
 ## Prerequisites
 
 - Node 18+
-- Cloudflare account (paid plan for Workers for Platforms)
-- Wrangler CLI: `npm install -g wrangler` (or use `npx wrangler`)
+- Cloudflare account (paid plan required for Workers for Platforms)
+- Wrangler CLI (`npm install -g wrangler`)
+- Anthropic API key
 
 ## Setup
 
@@ -44,81 +72,89 @@ Subdomain routing is planned later; see [docs/subdomain-routing-todo.md](./docs/
 
 2. **Create Cloudflare resources**
 
-   - **D1 (platform DB)**  
+   - **D1 (platform DB)**
      ```bash
      npx wrangler d1 create platform-db
-     ```  
-     Put the returned `database_id` into `wrangler.toml` under `[[d1_databases]]` → `database_id`.
+     ```
+     Copy the `database_id` into `wrangler.toml` under `[[d1_databases]]`.
 
-   - **R2 bucket**  
-     In Dashboard: R2 → Create bucket → name it `user-code` (or set `bucket_name` in `wrangler.toml` to your name).
+   - **R2 bucket**
+     ```bash
+     npx wrangler r2 bucket create user-code
+     ```
 
-   - **KV namespace**  
+   - **KV namespace**
      ```bash
      npx wrangler kv namespace create SESSIONS
-     ```  
-     Put the returned `id` into `wrangler.toml` under `[[kv_namespaces]]` → `id`.
+     ```
+     Copy the `id` into `wrangler.toml` under `[[kv_namespaces]]`.
 
-   - **Dispatch namespace**  
-     In Dashboard: Workers for Platforms → Create dispatch namespace → name it `user-apps`.  
-     In `wrangler.toml`, the `[[dispatch_namespaces]]` binding should use that namespace name.
+   - **Dispatch namespace**
+     In the Cloudflare dashboard: Workers for Platforms → Create dispatch namespace → name it `user-apps`.
 
 3. **Run platform migrations**
 
    ```bash
    npm run db:migrate:local   # local dev
-   npm run db:migrate        # remote
+   npm run db:migrate         # remote
    ```
 
-4. **Secrets and vars**
+4. **Set secrets**
 
-   - **API token** (for D1/Worker provisioning from inside the Worker):  
-     ```bash
-     npx wrangler secret put CLOUDFLARE_API_TOKEN
-     ```  
-     Use a token with: D1 Edit, Workers Scripts Write, Account Settings Read, R2 Object Read/Write (if you use R2 from API).
+   ```bash
+   npx wrangler secret put ANTHROPIC_API_KEY
+   npx wrangler secret put CLOUDFLARE_API_TOKEN
+   npx wrangler secret put PLATFORM_JWT_SECRET
+   ```
 
-   - **Platform JWT secret**:  
-     ```bash
-     npx wrangler secret put PLATFORM_JWT_SECRET
-     ```  
-     Use a long random string (e.g. `openssl rand -hex 32`).
+   The `CLOUDFLARE_API_TOKEN` needs: Workers Scripts Write, D1 Edit, R2 Object Read/Write, Account Settings Read.
+   The `PLATFORM_JWT_SECRET` can be any long random string (`openssl rand -hex 32`).
 
-   - In `wrangler.toml`, set `CLOUDFLARE_ACCOUNT_ID` under `[vars]` to your account ID.
+5. **Set account ID**
 
-5. **Local dev**
+   In `wrangler.toml` under `[vars]`, set `CLOUDFLARE_ACCOUNT_ID` to your Cloudflare account ID.
+
+6. **Local dev**
 
    ```bash
    npm run dev
    ```
 
-   Open the builder UI, register, create a project, chat to describe the app, then click **Deploy**. The app will be at `http://localhost:8787/apps/<projectId>/`.
+   Open `http://localhost:8787`, register, describe your app, and hit Build.
 
-6. **Deploy platform**
+7. **Deploy**
 
    ```bash
    npm run deploy
    ```
 
-   Then set secrets (and vars) for the deployed Worker as above if you didn’t already.
-
 ## Project layout
 
-- `src/index.ts` – Hono app: API routes, `/apps/:id/*` dispatch, serve builder UI at `/`
-- `src/auth.ts` – Password hashing and JWT
-- `src/middleware.ts` – JWT auth middleware
-- `src/routes/auth.ts` – Register / login
-- `src/routes/chat.ts` – Chat and history
-- `src/routes/projects.ts` – Projects CRUD, build, files, delete
-- `src/ai.ts` – Plan + code generation and chat streaming (Workers AI)
-- `src/build.ts` – Build pipeline (plan → code → D1 → assets → deploy Worker)
-- `src/teardown.ts` – Delete project Worker, D1, R2
-- `src/cf-api.ts` – Cloudflare REST: D1 create/query/delete, Worker deploy/delete
-- `src/ui.ts` – Builder UI HTML (single page)
-- `schema/platform.sql` – Platform D1 schema
+```
+src/
+  index.ts          # Hono app entrypoint: routing, /apps/:id/* dispatch
+  agent.ts          # Claude tool-use agent loop (generate → write → deploy)
+  build.ts          # Build pipeline: reads conversation, calls agent
+  workflow.ts       # Cloudflare Workflow: durable agent execution with retries
+  builderScript.ts  # Browser JS for the builder UI (served at /builder-app.js)
+  ui.ts             # Builder UI HTML shell
+  auth.ts           # Password hashing (SHA-256 + salt) and JWT (HMAC-SHA256)
+  middleware.ts     # JWT auth middleware
+  cf-api.ts         # Cloudflare REST API: D1, Worker deploy/delete, R2
+  teardown.ts       # Delete project Worker, D1 database, and R2 files
+  types.ts          # Shared TypeScript types and Env interface
+  ai.ts             # (legacy) Workers AI helpers
+  routes/
+    auth.ts         # Register, login, change-password
+    chat.ts         # Send message, chat history
+    projects.ts     # Projects CRUD, build trigger, SSE stream, file list
+schema/
+  platform.sql      # Platform D1 schema (users, projects, chat_messages, build_events, build_logs)
+```
 
 ## Cost notes
 
-- Workers, D1, R2, KV, and Workers AI are billed per use; see Cloudflare pricing.
-- Workers for Platforms is included on the paid Workers plan.
-- Each generated app is a Worker in the dispatch namespace with its own D1 and shared R2 bucket.
+- Each agent build run makes several Anthropic API calls (Claude Sonnet 4.6)
+- Each deployed app is a Worker in the dispatch namespace with its own D1 database
+- Workers, D1, R2, KV, and Workers for Platforms are billed per Cloudflare pricing
+- Project names are AI-generated using Claude Haiku (lightweight, fast)
