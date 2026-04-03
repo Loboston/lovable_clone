@@ -25,7 +25,7 @@ function api(path, opts = {}) {
 let currentProjectId = null;
 let projects = [];
 let lastMessageAt = '';
-let lastEventAt = '';
+const lastEventAtMap = new Map();
 let projectsCollapsed = false;
 let userName = localStorage.getItem('userName') || '';
 
@@ -119,7 +119,6 @@ function renderSidebar() {
     document.getElementById('backToDashboardBtn').onclick = () => {
       currentProjectId = null;
       lastMessageAt = '';
-      lastEventAt = '';
       renderSidebar();
       renderMain();
     };
@@ -203,7 +202,7 @@ function renderSidebar() {
 
         const progressEls = [];
         const abortCtrl = new AbortController();
-        let lastEvAt = lastEventAt;
+        let lastEvAt = lastEventAtMap.get(capturedProjectId) || '';
         let progressBox = null;
         let progressList = null;
         let lastProgressItem = null;
@@ -234,7 +233,7 @@ function renderSidebar() {
             progressList.appendChild(lastProgressItem);
 
             lastEvAt = msg.created_at;
-            lastEventAt = msg.created_at;
+            lastEventAtMap.set(capturedProjectId, msg.created_at);
             ul.scrollTop = ul.scrollHeight;
           }
 
@@ -522,7 +521,6 @@ function renderProjectList() {
       if (currentProjectId === btn.dataset.id) return;
       currentProjectId = btn.dataset.id;
       lastMessageAt = '';
-      lastEventAt = '';
       renderSidebar();
       renderMain();
     };
@@ -604,7 +602,6 @@ function renderMain() {
       projects.unshift(data.project);
       currentProjectId = data.project.id;
       lastMessageAt = '';
-      lastEventAt = '';
       renderSidebar();
       renderMain();
       // Auto-send the prompt (sendBtn and chatInput are now in the sidebar)
