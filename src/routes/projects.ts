@@ -243,13 +243,15 @@ app.delete("/:id", async (c) => {
 
   if (!project) return c.json({ error: "Project not found" }, 404);
 
+  // Best-effort CF resource cleanup — don't block DB delete if it fails
   try {
     await teardownProject(c.env, id, project.worker_name, project.d1_database_id);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Teardown failed";
-    return c.json({ error: message }, 500);
+    console.error("Teardown failed (continuing with DB delete):", err);
   }
 
+  await c.env.DB.prepare("DELETE FROM build_events WHERE project_id = ?").bind(id).run();
+  await c.env.DB.prepare("DELETE FROM build_logs WHERE project_id = ?").bind(id).run();
   await c.env.DB.prepare("DELETE FROM chat_messages WHERE project_id = ?").bind(id).run();
   await c.env.DB.prepare("DELETE FROM projects WHERE id = ?").bind(id).run();
 
