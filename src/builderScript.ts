@@ -38,32 +38,120 @@ function render() {
 
   if (!token) {
     root.innerHTML = \`
-      <div class="max-w-md mx-auto mt-20 p-6 space-y-4">
-        <h1 class="text-2xl font-bold">App Builder</h1>
-        <form id="authForm" class="space-y-3">
-          <input type="email" id="email" placeholder="Email" class="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600" />
-          <input type="password" id="password" placeholder="Password" class="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600" />
-          <div class="flex gap-2">
-            <button type="submit" name="action" value="login" class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700">Login</button>
-            <button type="submit" name="action" value="register" class="px-4 py-2 rounded bg-slate-600 hover:bg-slate-700">Register</button>
+      <style>
+        @keyframes drift {
+          0%   { transform: translateY(100vh) translateX(0);    opacity: 0; }
+          10%  { opacity: 1; }
+          90%  { opacity: 1; }
+          100% { transform: translateY(-100px) translateX(40px); opacity: 0; }
+        }
+        .particle { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: rgba(255,255,255,0.6); animation: drift linear infinite; pointer-events: none; }
+        #authSlider { display: flex; width: 200%; transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1); }
+        #authSlider.show-register { transform: translateX(-50%); }
+        .auth-panel { width: 50%; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+      </style>
+      <div class="relative min-h-screen bg-slate-950 flex items-center justify-center overflow-hidden">
+        <div id="particles" class="absolute inset-0 z-0"></div>
+        <div class="relative z-10 w-full max-w-sm overflow-hidden">
+          <div id="authSlider">
+
+            <!-- Login panel -->
+            <div class="auth-panel">
+              <div class="w-full space-y-6">
+                <div class="text-center space-y-1">
+                  <h1 class="text-4xl font-bold tracking-tight text-white">Welcome to</h1>
+                  <h2 class="text-4xl font-bold tracking-tight text-emerald-400">App Builder</h2>
+                  <p class="text-slate-400 text-sm pt-1">Describe an idea. Ship an app.</p>
+                </div>
+                <form id="loginForm" class="space-y-3">
+                  <input type="email" id="loginEmail" placeholder="Email" class="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm focus:outline-none focus:border-slate-500 text-white placeholder-slate-500" />
+                  <input type="password" id="loginPassword" placeholder="Password" class="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm focus:outline-none focus:border-slate-500 text-white placeholder-slate-500" />
+                  <button type="submit" class="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold transition-colors">Log in</button>
+                </form>
+                <p id="loginError" class="text-red-400 text-xs hidden"></p>
+                <div class="flex items-center gap-3">
+                  <div class="flex-1 h-px bg-slate-700"></div>
+                  <span class="text-slate-500 text-xs">or</span>
+                  <div class="flex-1 h-px bg-slate-700"></div>
+                </div>
+                <button id="openRegisterBtn" class="w-full py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm font-semibold transition-colors text-slate-200">Create an account</button>
+              </div>
+            </div>
+
+            <!-- Register panel -->
+            <div class="auth-panel">
+              <div class="w-full space-y-6">
+                <div class="text-center space-y-1">
+                  <h2 class="text-3xl font-bold tracking-tight text-white">Create account</h2>
+                  <p class="text-slate-400 text-sm">Get started for free</p>
+                </div>
+                <form id="registerForm" class="space-y-3">
+                  <input type="email" id="regEmail" placeholder="Email" class="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm focus:outline-none focus:border-slate-500 text-white placeholder-slate-500" />
+                  <input type="password" id="regPassword" placeholder="Password (min. 8 characters)" class="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm focus:outline-none focus:border-slate-500 text-white placeholder-slate-500" />
+                  <button type="submit" class="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold transition-colors">Create account</button>
+                </form>
+                <p id="registerError" class="text-red-400 text-xs hidden"></p>
+                <button id="backToLoginBtn" class="w-full text-slate-400 hover:text-white text-sm transition-colors">← Back to log in</button>
+              </div>
+            </div>
+
           </div>
-        </form>
-        <p id="authError" class="text-red-400 text-sm hidden"></p>
+        </div>
       </div>
     \`;
-    document.getElementById('authForm')?.addEventListener('submit', async (e) => {
+
+    // Particles
+    const container = document.getElementById('particles');
+    for (let i = 0; i < 18; i++) {
+      const p = document.createElement('div');
+      p.className = 'particle';
+      p.style.left = Math.random() * 100 + '%';
+      p.style.animationDuration = (6 + Math.random() * 8) + 's';
+      p.style.animationDelay = (Math.random() * 8) + 's';
+      container.appendChild(p);
+    }
+
+    const slider = document.getElementById('authSlider');
+
+    // Slide to register
+    document.getElementById('openRegisterBtn').onclick = () => {
+      slider.classList.add('show-register');
+      setTimeout(() => document.getElementById('regEmail').focus(), 450);
+    };
+
+    // Slide back to login
+    document.getElementById('backToLoginBtn').onclick = () => {
+      slider.classList.remove('show-register');
+    };
+
+    // Login
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const form = e.target;
-      const action = e.submitter?.value === 'register' ? 'register' : 'login';
-      const errEl = document.getElementById('authError');
+      const errEl = document.getElementById('loginError');
+      errEl.classList.add('hidden');
       try {
-        const r = await api('/api/auth/' + action, { method: 'POST', body: { email: form.email.value, password: form.password.value } });
+        const r = await api('/api/auth/login', { method: 'POST', body: { email: document.getElementById('loginEmail').value, password: document.getElementById('loginPassword').value } });
         const data = await r.json();
-        if (!r.ok) { errEl.textContent = data.error || 'Failed'; errEl.classList.remove('hidden'); return; }
+        if (!r.ok) { errEl.textContent = data.error || 'Login failed'; errEl.classList.remove('hidden'); return; }
         setToken(data.token);
         render();
       } catch (err) { errEl.textContent = err.message; errEl.classList.remove('hidden'); }
     });
+
+    // Register
+    document.getElementById('registerForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('registerError');
+      errEl.classList.add('hidden');
+      try {
+        const r = await api('/api/auth/register', { method: 'POST', body: { email: document.getElementById('regEmail').value, password: document.getElementById('regPassword').value } });
+        const data = await r.json();
+        if (!r.ok) { errEl.textContent = data.error || 'Registration failed'; errEl.classList.remove('hidden'); return; }
+        setToken(data.token);
+        render();
+      } catch (err) { errEl.textContent = err.message; errEl.classList.remove('hidden'); }
+    });
+
     return;
   }
 
@@ -72,8 +160,8 @@ function render() {
       <div id="appShell" class="flex h-screen overflow-hidden relative">
         <aside id="sidebar" class="w-[32rem] border-r border-slate-700 flex flex-col shrink-0 overflow-hidden"></aside>
         <div id="mainContent" class="flex-1 overflow-hidden flex flex-col"></div>
-        <!-- Profile drawer -->
-        <div id="profileDrawer" class="hidden absolute inset-y-0 right-0 w-96 bg-slate-900 border-l border-slate-700 flex flex-col shadow-2xl z-30 translate-x-full transition-transform duration-300"></div>
+        <!-- Profile drawer — always in DOM, slides via translate -->
+        <div id="profileDrawer" class="absolute inset-y-0 right-0 w-96 bg-slate-900 border-l border-slate-700 flex flex-col shadow-2xl z-30 translate-x-full transition-transform duration-300 ease-in-out"></div>
         <div id="profileBackdrop" class="hidden absolute inset-0 bg-black/30 z-20"></div>
       </div>
     \`;
@@ -440,15 +528,13 @@ function openProfileDrawer() {
     </div>
   \`;
 
-  // Slide in
-  drawer.classList.remove('hidden');
+  // Slide in — double rAF ensures browser paints the off-screen position first
   backdrop.classList.remove('hidden');
-  requestAnimationFrame(() => drawer.classList.remove('translate-x-full'));
+  requestAnimationFrame(() => requestAnimationFrame(() => drawer.classList.remove('translate-x-full')));
 
   const close = () => {
     drawer.classList.add('translate-x-full');
     backdrop.classList.add('hidden');
-    setTimeout(() => drawer.classList.add('hidden'), 300);
   };
 
   document.getElementById('closeProfileBtn').onclick = close;
