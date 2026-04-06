@@ -49,6 +49,12 @@ export class BuildWorkflow extends WorkflowEntrypoint<Env, BuildWorkflowParams> 
 
       // Save the agent's text responses as assistant chat messages
       await step.do("save-chat-messages", async () => {
+        // Guard: don't save messages from a cancelled or replaced build
+        const current = await this.env.DB.prepare(
+          "SELECT build_id FROM projects WHERE id = ?"
+        ).bind(projectId).first<{ build_id: string | null }>();
+        if (!current || current.build_id !== buildId) return;
+
         for (const msg of result.assistantMessages) {
           if (msg.trim()) {
             await this.env.DB.prepare(
