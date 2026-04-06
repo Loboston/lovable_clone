@@ -699,18 +699,26 @@ function openSettingsModal() {
         btn.disabled = true; btn.textContent = 'Fetching...';
         try {
           const files = ['worker.js', 'index.html', 'migration.sql'];
+          let downloaded = 0;
           for (const file of files) {
             const r = await fetch(\`/api/projects/\${projectId}/file/\${file}\`, { headers: { Authorization: 'Bearer ' + getToken() } });
             if (!r.ok) continue;
             const text = await r.text();
             const blob = new Blob([text], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = \`\${projectName.replace(/[\\s]+/g, '-')}-\${file}\`;
+            a.href = url;
+            a.download = \`\${projectName.replace(/[^a-zA-Z0-9]+/g, '-')}-\${file}\`;
+            document.body.appendChild(a);
             a.click();
-            URL.revokeObjectURL(a.href);
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+            downloaded++;
+            // Stagger downloads so browser doesn't block them
+            await new Promise(res => setTimeout(res, 300));
           }
-          msg.textContent = 'Files downloaded.'; msg.className = 'text-xs text-emerald-400';
+          msg.textContent = \`\${downloaded} file\${downloaded !== 1 ? 's' : ''} downloaded.\`;
+          msg.className = 'text-xs text-emerald-400';
         } catch { msg.textContent = 'Export failed.'; msg.className = 'text-xs text-red-400'; }
         finally { btn.disabled = false; btn.textContent = 'Export'; }
       };
