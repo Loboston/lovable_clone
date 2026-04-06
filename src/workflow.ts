@@ -55,11 +55,11 @@ export class BuildWorkflow extends WorkflowEntrypoint<Env, BuildWorkflowParams> 
 
       // Update project status based on whether a deploy happened
       await step.do("update-project-status", async () => {
-        // Guard: if user cancelled or a new build started, don't overwrite
+        // Guard: if user cancelled, don't overwrite
         const current = await this.env.DB.prepare(
           "SELECT status FROM projects WHERE id = ?"
         ).bind(projectId).first<{ status: string }>();
-        if (!current || current.status === "idle" || current.status === "thinking") return;
+        if (!current || current.status === "idle") return;
 
         if (result.deployed) {
           await this.env.DB.prepare(
@@ -81,11 +81,11 @@ export class BuildWorkflow extends WorkflowEntrypoint<Env, BuildWorkflowParams> 
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Build failed";
-      // Guard: don't overwrite a cancelled or new build
+      // Guard: don't overwrite a cancelled build
       const current = await this.env.DB.prepare(
         "SELECT status FROM projects WHERE id = ?"
       ).bind(projectId).first<{ status: string }>();
-      if (current && current.status !== "idle" && current.status !== "thinking") {
+      if (current && current.status !== "idle") {
         await this.env.DB.prepare("UPDATE projects SET status = ? WHERE id = ?")
           .bind("error", projectId)
           .run();
