@@ -102,7 +102,7 @@ app.post("/:id/build", async (c) => {
   if (!project) return c.json({ error: "Project not found" }, 404);
   if (project.status === "building") return c.json({ error: "Build already in progress" }, 409);
 
-  await c.env.DB.prepare("UPDATE projects SET status = ? WHERE id = ?")
+  await c.env.DB.prepare("UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ?")
     .bind("building", id)
     .run();
 
@@ -255,6 +255,27 @@ app.get("/:id/file/:filename", async (c) => {
   return new Response(text, {
     headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
+});
+
+app.post("/:id/cancel", async (c) => {
+  const id = c.req.param("id");
+  const user = c.get("user");
+
+  const project = await c.env.DB.prepare(
+    "SELECT id FROM projects WHERE id = ? AND user_id = ?"
+  )
+    .bind(id, user.sub)
+    .first();
+
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  await c.env.DB.prepare(
+    "UPDATE projects SET status = 'idle', updated_at = datetime('now') WHERE id = ?"
+  )
+    .bind(id)
+    .run();
+
+  return c.json({ success: true });
 });
 
 app.delete("/:id", async (c) => {

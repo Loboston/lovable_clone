@@ -18,14 +18,26 @@ app.post("/", async (c) => {
   const user = c.get("user");
 
   const project = await c.env.DB.prepare(
-    "SELECT id, name, status FROM projects WHERE id = ? AND user_id = ?"
+    "SELECT id, name, status, updated_at FROM projects WHERE id = ? AND user_id = ?"
   )
     .bind(projectId, user.sub)
-    .first<{ id: string; name: string; status: string }>();
+    .first<{ id: string; name: string; status: string; updated_at: string }>();
 
   if (!project) return c.json({ error: "Project not found" }, 404);
+
   if (project.status === "building" || project.status === "thinking") {
-    return c.json({ error: "A build is already in progress for this project" }, 409);
+    // Auto-expire builds stuck for more than 10 minutes
+    const updatedAt = new Date(project.updated_at + "Z").getTime();
+    const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+    if (updatedAt > tenMinutesAgo) {
+      return c.json({ error: "A build is already in progress for this project" }, 409);
+    }
+    await c.env.DB.prepare(
+      "UPDATE projects SET status = 'idle', updated_at = datetime('now') WHERE id = ?"
+    )
+      .bind(projectId)
+      .run();
+    project.status = "idle";
   }
 
   // Save the user message
@@ -37,7 +49,9 @@ app.post("/", async (c) => {
 
   // Set project to "thinking" so the UI knows the agent is running
   const previousStatus = project.status;
-  await c.env.DB.prepare("UPDATE projects SET status = ? WHERE id = ?")
+  await c.env.DB.prepare(
+    "UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ?"
+  )
     .bind("thinking", projectId)
     .run();
 

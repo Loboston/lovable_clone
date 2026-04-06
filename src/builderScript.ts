@@ -49,6 +49,31 @@ async function streamBuildEvents(projectId) {
     if (el) el.remove();
   };
 
+  const showSend = () => {
+    const send = document.getElementById('sendBtn');
+    const cancel = document.getElementById('cancelBtn');
+    if (send) { send.classList.remove('hidden'); send.disabled = false; }
+    if (cancel) cancel.classList.add('hidden');
+  };
+
+  const showCancel = () => {
+    const send = document.getElementById('sendBtn');
+    const cancel = document.getElementById('cancelBtn');
+    if (send) send.classList.add('hidden');
+    if (cancel) {
+      cancel.classList.remove('hidden');
+      cancel.onclick = async () => {
+        try { await api(\`/api/projects/\${projectId}/cancel\`, { method: 'POST' }); } catch (_) {}
+        abortCtrl.abort();
+        showSend();
+        const p = projects.find(x => x.id === projectId);
+        if (p) p.status = 'idle';
+      };
+    }
+  };
+
+  showCancel();
+
   const handleMsg = async (msg) => {
     if (currentProjectId !== projectId) { abortCtrl.abort(); return; }
     const ul = document.getElementById('chatMessages');
@@ -59,18 +84,30 @@ async function streamBuildEvents(projectId) {
       if (!progressBox) {
         progressBox = document.createElement('li');
         progressBox.className = 'flex justify-start w-full';
-        progressBox.innerHTML = \`<div class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 w-full max-w-[85%]"><ul class="progress-steps space-y-1 text-xs"></ul></div>\`;
+        progressBox.innerHTML = \`<div class="bg-slate-800 border border-slate-700 rounded-lg w-full max-w-[85%] overflow-hidden">
+          <button class="progress-toggle w-full flex items-center justify-between px-3 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors">
+            <span class="font-medium">Build steps</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="progress-chevron transition-transform"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <ul class="progress-steps px-3 pb-2 space-y-1 text-xs"></ul>
+        </div>\`;
         ul.appendChild(progressBox);
         progressList = progressBox.querySelector('.progress-steps');
+        progressBox.querySelector('.progress-toggle').onclick = () => {
+          const steps = progressBox.querySelector('.progress-steps');
+          const chevron = progressBox.querySelector('.progress-chevron');
+          steps.classList.toggle('hidden');
+          chevron.classList.toggle('rotate-180');
+        };
       }
       if (lastProgressItem) {
-        lastProgressItem.innerHTML = \`<span class="text-slate-500 mr-1.5">✓</span><span class="text-slate-500">\${lastProgressItem.dataset.msg}</span>\`;
+        lastProgressItem.innerHTML = \`<span class="text-slate-500 mr-1.5 shrink-0">✓</span><span class="text-slate-500">\${lastProgressItem.dataset.msg}</span>\`;
       }
       lastProgressItem = document.createElement('li');
       lastProgressItem.className = 'flex items-start';
       lastProgressItem.dataset.msg = msg.message;
-      lastProgressItem.innerHTML = \`<span class="text-emerald-400 mr-1.5 shrink-0">→</span><span class="text-slate-200">\${msg.message}</span>\`;
-      progressList.appendChild(lastProgressItem);
+      lastProgressItem.innerHTML = \`<span class="text-emerald-400 mr-1.5 shrink-0">→</span><span class="shimmer-text">\${msg.message}</span>\`;
+      progressList.prepend(lastProgressItem);
       lastEvAt = msg.created_at;
       lastEventAtMap.set(projectId, msg.created_at);
       ul.scrollTop = ul.scrollHeight;
@@ -82,9 +119,9 @@ async function streamBuildEvents(projectId) {
       abortCtrl.abort();
       removeThinking();
       if (lastProgressItem) {
-        lastProgressItem.innerHTML = \`<span class="text-slate-500 mr-1.5">✓</span><span class="text-slate-500">\${lastProgressItem.dataset.msg}</span>\`;
+        lastProgressItem.innerHTML = \`<span class="text-slate-500 mr-1.5 shrink-0">✓</span><span class="text-slate-500">\${lastProgressItem.dataset.msg}</span>\`;
       }
-      if (progressBox) progressBox.remove();
+      // Leave progressBox in DOM as build history
 
       if (msg.status === 'deployed' && msg.deployed_url) {
         const p = projects.find(x => x.id === projectId);
@@ -115,8 +152,7 @@ async function streamBuildEvents(projectId) {
         if (ul) ul.scrollTop = ul.scrollHeight;
       } catch (_) {}
 
-      const sendBtn = document.getElementById('sendBtn');
-      if (sendBtn) sendBtn.disabled = false;
+      showSend();
 
       // Fire queued message if one is waiting
       if (queuedMessage && currentProjectId === projectId) {
@@ -124,6 +160,7 @@ async function streamBuildEvents(projectId) {
         queuedMessage = null;
         document.getElementById('queuedBubble')?.remove();
         const chatInput = document.getElementById('chatInput');
+        const sendBtn = document.getElementById('sendBtn');
         if (chatInput && sendBtn) { chatInput.value = queued; sendBtn.click(); }
       }
     }
@@ -156,8 +193,7 @@ async function streamBuildEvents(projectId) {
     }
   }
 
-  const sendBtn = document.getElementById('sendBtn');
-  if (sendBtn) sendBtn.disabled = false;
+  showSend();
 }
 
 function showThinkingIndicator() {
@@ -304,6 +340,26 @@ function render() {
   }
 
   if (!document.getElementById('appShell')) {
+    if (!document.getElementById('shimmerStyles')) {
+      const style = document.createElement('style');
+      style.id = 'shimmerStyles';
+      style.textContent = \`
+        @keyframes shimmer-scan {
+          0%   { background-position: -200% center; }
+          100% { background-position:  200% center; }
+        }
+        .shimmer-text {
+          background: linear-gradient(90deg, #94a3b8 35%, #e2e8f0 50%, #94a3b8 65%);
+          background-size: 200% auto;
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          animation: shimmer-scan 1.8s linear infinite;
+        }
+      \`;
+      document.head.appendChild(style);
+    }
+
     root.innerHTML = \`
       <div id="appShell" class="flex h-screen overflow-hidden relative \${darkMode ? '' : 'light-mode'}">
         <!-- Mini sidebar -->
@@ -407,6 +463,7 @@ function renderSidebar() {
         <div class="shrink-0 p-2 border-t border-slate-700">
           <textarea id="chatInput" rows="3" class="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 resize-none text-sm focus:outline-none focus:border-slate-400" placeholder="Ask for changes..."></textarea>
           <button id="sendBtn" class="mt-1 w-full px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-700 text-sm font-medium">Send</button>
+          <button id="cancelBtn" class="mt-1 w-full px-4 py-2 rounded bg-red-700 hover:bg-red-600 text-sm font-medium text-white hidden">■ Stop build</button>
         </div>
       </div>
     \`;
@@ -444,8 +501,6 @@ function renderSidebar() {
       // Auto-reconnect if the project is still building/thinking
       const currentProj = projects.find(p => p.id === currentProjectId);
       if (currentProj?.status === 'building' || currentProj?.status === 'thinking') {
-        const sb = document.getElementById('sendBtn');
-        if (sb) sb.disabled = true;
         showThinkingIndicator();
         streamBuildEvents(currentProjectId);
       }
