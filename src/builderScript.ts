@@ -658,16 +658,15 @@ function openSettingsModal() {
       </div>
       <div class="space-y-4 border-t border-slate-700 pt-4">
         <h3 class="text-xs font-semibold uppercase tracking-widest text-slate-400">Export</h3>
-        <div class="text-xs text-slate-400">Download the generated files for the selected project.</div>
-        <div id="exportProjectSelect" class="space-y-2">
-          \${projects.length === 0 ? '<p class="text-xs text-slate-500">No projects yet.</p>' : projects.map(p => \`
-            <div class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">
-              <span class="text-sm truncate mr-3">\${p.name}</span>
-              <button class="exportBtn shrink-0 px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-xs font-medium transition-colors" data-id="\${p.id}" data-name="\${p.name}">Export</button>
-            </div>
-          \`).join('')}
-        </div>
-        <p id="exportMsg" class="text-xs hidden"></p>
+        <div class="text-xs text-slate-400">Download the generated source files for a project.</div>
+        \${projects.length === 0 ? '<p class="text-xs text-slate-500">No projects yet.</p>' : \`
+          <select id="exportSelect" class="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-200 focus:outline-none focus:border-slate-500">
+            <option value="">Select a project...</option>
+            \${projects.map(p => \`<option value="\${p.id}" data-name="\${p.name}">\${p.name}</option>\`).join('')}
+          </select>
+          <button id="exportBtn" class="w-full px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium transition-colors">Export files</button>
+          <p id="exportMsg" class="text-xs hidden"></p>
+        \`}
       </div>
     </div>
   \`, () => {
@@ -691,12 +690,15 @@ function openSettingsModal() {
       btn.querySelector('span').className = \`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform \${showPreviewByDefault ? 'translate-x-5' : ''}\`;
     };
 
-    document.querySelectorAll('.exportBtn').forEach(btn => {
-      btn.onclick = async () => {
-        const projectId = btn.dataset.id;
-        const projectName = btn.dataset.name;
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+      exportBtn.onclick = async () => {
+        const select = document.getElementById('exportSelect');
+        const projectId = select.value;
+        const projectName = select.options[select.selectedIndex]?.dataset.name || 'project';
         const msg = document.getElementById('exportMsg');
-        btn.disabled = true; btn.textContent = 'Fetching...';
+        if (!projectId) { msg.textContent = 'Please select a project.'; msg.className = 'text-xs text-red-400'; return; }
+        exportBtn.disabled = true; exportBtn.textContent = 'Exporting...'; msg.className = 'text-xs hidden';
         try {
           const files = ['worker.js', 'index.html', 'migration.sql'];
           let downloaded = 0;
@@ -714,15 +716,14 @@ function openSettingsModal() {
             document.body.removeChild(a);
             setTimeout(() => URL.revokeObjectURL(url), 5000);
             downloaded++;
-            // Stagger downloads so browser doesn't block them
             await new Promise(res => setTimeout(res, 300));
           }
           msg.textContent = \`\${downloaded} file\${downloaded !== 1 ? 's' : ''} downloaded.\`;
           msg.className = 'text-xs text-emerald-400';
         } catch { msg.textContent = 'Export failed.'; msg.className = 'text-xs text-red-400'; }
-        finally { btn.disabled = false; btn.textContent = 'Export'; }
+        finally { exportBtn.disabled = false; exportBtn.textContent = 'Export files'; }
       };
-    });
+    }
   });
 }
 
