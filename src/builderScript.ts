@@ -30,6 +30,152 @@ let projectsCollapsed = false;
 let userName = localStorage.getItem('userName') || '';
 let showPreviewByDefault = localStorage.getItem('showPreview') !== 'false';
 let darkMode = localStorage.getItem('darkMode') !== 'false';
+let activeStreamAbort = null;
+let queuedMessage = null;
+
+// ── Build stream ──────────────────────────────────────────────────────────────
+// Shared SSE stream handler used by sendBtn and auto-reconnect.
+
+async function streamBuildEvents(projectId) {
+  if (activeStreamAbort) activeStreamAbort.abort();
+  const abortCtrl = new AbortController();
+  activeStreamAbort = abortCtrl;
+
+  let lastEvAt = lastEventAtMap.get(projectId) || '';
+  let progressBox = null, progressList = null, lastProgressItem = null;
+
+  const removeThinking = () => {
+    const el = document.getElementById('thinkingIndicator');
+    if (el) el.remove();
+  };
+
+  const handleMsg = async (msg) => {
+    if (currentProjectId !== projectId) { abortCtrl.abort(); return; }
+    const ul = document.getElementById('chatMessages');
+    if (!ul) return;
+
+    if (msg.type === 'event') {
+      removeThinking();
+      if (!progressBox) {
+        progressBox = document.createElement('li');
+        progressBox.className = 'flex justify-start w-full';
+        progressBox.innerHTML = \`<div class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 w-full max-w-[85%]"><ul class="progress-steps space-y-1 text-xs"></ul></div>\`;
+        ul.appendChild(progressBox);
+        progressList = progressBox.querySelector('.progress-steps');
+      }
+      if (lastProgressItem) {
+        lastProgressItem.innerHTML = \`<span class="text-slate-500 mr-1.5">✓</span><span class="text-slate-500">\${lastProgressItem.dataset.msg}</span>\`;
+      }
+      lastProgressItem = document.createElement('li');
+      lastProgressItem.className = 'flex items-start';
+      lastProgressItem.dataset.msg = msg.message;
+      lastProgressItem.innerHTML = \`<span class="text-emerald-400 mr-1.5 shrink-0">→</span><span class="text-slate-200">\${msg.message}</span>\`;
+      progressList.appendChild(lastProgressItem);
+      lastEvAt = msg.created_at;
+      lastEventAtMap.set(projectId, msg.created_at);
+      ul.scrollTop = ul.scrollHeight;
+    }
+
+    if (msg.type === 'heartbeat' && msg.lastAt) lastEvAt = msg.lastAt;
+
+    if (msg.type === 'status') {
+      abortCtrl.abort();
+      removeThinking();
+      if (lastProgressItem) {
+        lastProgressItem.innerHTML = \`<span class="text-slate-500 mr-1.5">✓</span><span class="text-slate-500">\${lastProgressItem.dataset.msg}</span>\`;
+      }
+      if (progressBox) progressBox.remove();
+
+      if (msg.status === 'deployed' && msg.deployed_url) {
+        const p = projects.find(x => x.id === projectId);
+        if (p) { p.status = 'deployed'; p.deployed_url = msg.deployed_url; }
+        const statusBar = document.getElementById('statusBar');
+        if (statusBar) statusBar.innerHTML = \`<a id="openAppLink" href="\${msg.deployed_url}" target="_blank" class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold text-emerald-100 transition-colors"><span class="inline-block w-2 h-2 rounded-full bg-emerald-300"></span>Deployed — Open app ↗</a>\`;
+        const frame = document.getElementById('previewFrame');
+        if (frame) frame.src = msg.deployed_url;
+      } else if (msg.status === 'error') {
+        const ul = document.getElementById('chatMessages');
+        if (ul) { const e = document.createElement('li'); e.className = 'text-left text-red-400'; e.textContent = 'Build failed. Check messages above.'; ul.appendChild(e); }
+      }
+
+      // Fetch new assistant messages
+      try {
+        const msgData = await (await api(\`/api/chat/\${projectId}/history?since=\${encodeURIComponent(lastMessageAt)}\`)).json();
+        const ul = document.getElementById('chatMessages');
+        for (const m of (msgData.messages || [])) {
+          if (m.role === 'assistant' && ul) {
+            const li = document.createElement('li'); li.className = 'flex justify-start';
+            const bubble = document.createElement('div');
+            bubble.className = 'bg-slate-700 text-slate-100 px-3 py-2 rounded-2xl rounded-tl-sm max-w-[85%] text-sm';
+            bubble.textContent = m.content?.slice(0, 500) + (m.content?.length > 500 ? '...' : '');
+            li.appendChild(bubble); ul.appendChild(li);
+            lastMessageAt = m.created_at;
+          }
+        }
+        if (ul) ul.scrollTop = ul.scrollHeight;
+      } catch (_) {}
+
+      const sendBtn = document.getElementById('sendBtn');
+      if (sendBtn) sendBtn.disabled = false;
+
+      // Fire queued message if one is waiting
+      if (queuedMessage && currentProjectId === projectId) {
+        const queued = queuedMessage;
+        queuedMessage = null;
+        document.getElementById('queuedBubble')?.remove();
+        const chatInput = document.getElementById('chatInput');
+        if (chatInput && sendBtn) { chatInput.value = queued; sendBtn.click(); }
+      }
+    }
+  };
+
+  while (!abortCtrl.signal.aborted) {
+    try {
+      const streamRes = await fetch(
+        \`/api/projects/\${projectId}/stream?since=\${encodeURIComponent(lastEvAt)}\`,
+        { headers: { Authorization: 'Bearer ' + getToken() }, signal: abortCtrl.signal }
+      );
+      if (!streamRes.ok || !streamRes.body) break;
+      const reader = streamRes.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try { await handleMsg(JSON.parse(line.slice(6))); } catch (_) {}
+        }
+      }
+    } catch (e) {
+      if (abortCtrl.signal.aborted) break;
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+
+  const sendBtn = document.getElementById('sendBtn');
+  if (sendBtn) sendBtn.disabled = false;
+}
+
+function showThinkingIndicator() {
+  const ul = document.getElementById('chatMessages');
+  if (!ul || document.getElementById('thinkingIndicator')) return;
+  const li = document.createElement('li');
+  li.id = 'thinkingIndicator';
+  li.className = 'text-left text-slate-500 italic';
+  li.textContent = 'Thinking.';
+  ul.appendChild(li);
+  ul.scrollTop = ul.scrollHeight;
+  let dotCount = 1;
+  const interval = setInterval(() => {
+    if (!li.isConnected) { clearInterval(interval); return; }
+    dotCount = (dotCount % 3) + 1;
+    li.textContent = 'Thinking' + '.'.repeat(dotCount);
+  }, 500);
+}
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
 // Created once after login. renderSidebar/renderMain swap content independently.
@@ -307,6 +453,22 @@ function renderSidebar() {
       if (!ul) return;
       const capturedProjectId = currentProjectId;
 
+      // If a build is already running, queue the message instead
+      const proj = projects.find(p => p.id === capturedProjectId);
+      if (proj?.status === 'building' || proj?.status === 'thinking') {
+        queuedMessage = text;
+        chatInput.value = '';
+        document.getElementById('queuedBubble')?.remove();
+        const qLi = document.createElement('li');
+        qLi.id = 'queuedBubble';
+        qLi.className = 'flex justify-end';
+        qLi.innerHTML = \`<div class="bg-slate-700 text-slate-400 px-3 py-2 rounded-2xl rounded-tr-sm max-w-[85%] text-sm border border-slate-600"><span class="text-xs text-slate-500 block mb-0.5">Queued</span>\${text}</div>\`;
+        ul.appendChild(qLi);
+        ul.scrollTop = ul.scrollHeight;
+        return;
+      }
+
+      // Optimistic user bubble
       const userLi = document.createElement('li');
       userLi.className = 'flex justify-end';
       const userBubble = document.createElement('div');
@@ -318,161 +480,28 @@ function renderSidebar() {
       sendBtn.disabled = true;
       ul.scrollTop = ul.scrollHeight;
 
-      const thinkingLi = document.createElement('li');
-      thinkingLi.className = 'text-left text-slate-500 italic';
-      thinkingLi.textContent = 'Thinking.';
-      ul.appendChild(thinkingLi);
-      ul.scrollTop = ul.scrollHeight;
-      let dotCount = 1;
-      const ellipsisInterval = setInterval(() => {
-        dotCount = (dotCount % 3) + 1;
-        thinkingLi.textContent = 'Thinking' + '.'.repeat(dotCount);
-      }, 500);
-      let thinkingRemoved = false;
-      function removeThinking() {
-        if (!thinkingRemoved) {
-          clearInterval(ellipsisInterval);
-          thinkingLi.remove();
-          thinkingRemoved = true;
-        }
-      }
+      showThinkingIndicator();
 
       try {
         const res = await api('/api/chat', { method: 'POST', body: { project_id: capturedProjectId, message: text } });
         const data = await res.json();
         if (!res.ok) {
-          removeThinking();
+          document.getElementById('thinkingIndicator')?.remove();
           const errLi = document.createElement('li');
           errLi.className = 'text-left text-red-400';
           errLi.textContent = data.error || 'Something went wrong';
           ul.appendChild(errLi);
+          sendBtn.disabled = false;
           return;
         }
-
-        const progressEls = [];
-        const abortCtrl = new AbortController();
-        let lastEvAt = lastEventAtMap.get(capturedProjectId) || '';
-        let progressBox = null;
-        let progressList = null;
-        let lastProgressItem = null;
-
-        const handleMsg = async (msg) => {
-          if (currentProjectId !== capturedProjectId) { abortCtrl.abort(); return; }
-
-          if (msg.type === 'event') {
-            removeThinking();
-
-            if (!progressBox) {
-              progressBox = document.createElement('li');
-              progressBox.className = 'flex justify-start w-full';
-              progressBox.innerHTML = \`<div class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 w-full max-w-[85%]"><ul class="progress-steps space-y-1 text-xs"></ul></div>\`;
-              ul.appendChild(progressBox);
-              progressList = progressBox.querySelector('.progress-steps');
-              progressEls.push(progressBox);
-            }
-
-            if (lastProgressItem) {
-              lastProgressItem.innerHTML = \`<span class="text-slate-500 mr-1.5">✓</span><span class="text-slate-500">\${lastProgressItem.dataset.msg}</span>\`;
-            }
-
-            lastProgressItem = document.createElement('li');
-            lastProgressItem.className = 'flex items-start';
-            lastProgressItem.dataset.msg = msg.message;
-            lastProgressItem.innerHTML = \`<span class="text-emerald-400 mr-1.5 shrink-0">→</span><span class="text-slate-200">\${msg.message}</span>\`;
-            progressList.appendChild(lastProgressItem);
-
-            lastEvAt = msg.created_at;
-            lastEventAtMap.set(capturedProjectId, msg.created_at);
-            ul.scrollTop = ul.scrollHeight;
-          }
-
-          if (msg.type === 'heartbeat' && msg.lastAt) {
-            lastEvAt = msg.lastAt;
-          }
-
-          if (msg.type === 'status') {
-            abortCtrl.abort();
-            if (lastProgressItem) {
-              lastProgressItem.innerHTML = \`<span class="text-slate-500 mr-1.5">✓</span><span class="text-slate-500">\${lastProgressItem.dataset.msg}</span>\`;
-            }
-            progressEls.forEach(el => el.remove());
-
-            if (msg.status === 'deployed') {
-              const deployedUrl = msg.deployed_url;
-              if (deployedUrl) {
-                const p = projects.find(x => x.id === capturedProjectId);
-                if (p) { p.status = 'deployed'; p.deployed_url = deployedUrl; }
-                const statusBar = document.getElementById('statusBar');
-                if (statusBar) {
-                  statusBar.innerHTML = \`<a id="openAppLink" href="\${deployedUrl}" target="_blank" class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold text-emerald-100 transition-colors"><span class="inline-block w-2 h-2 rounded-full bg-emerald-300"></span>Deployed — Open app ↗</a>\`;
-                }
-                const frame = document.getElementById('previewFrame');
-                if (frame) frame.src = deployedUrl;
-              }
-            } else if (msg.status === 'error') {
-              const errLi = document.createElement('li');
-              errLi.className = 'text-left text-red-400';
-              errLi.textContent = 'Build failed. Check messages above.';
-              ul.appendChild(errLi);
-            }
-
-            removeThinking();
-
-            // Fetch assistant message(s) saved after build
-            try {
-              const msgData = await (await api(\`/api/chat/\${capturedProjectId}/history?since=\${encodeURIComponent(lastMessageAt)}\`)).json();
-              for (const m of (msgData.messages || [])) {
-                if (m.role === 'assistant') {
-                  const li = document.createElement('li');
-                  li.className = 'flex justify-start';
-                  const bubble = document.createElement('div');
-                  bubble.className = 'bg-slate-700 text-slate-100 px-3 py-2 rounded-2xl rounded-tl-sm max-w-[85%] text-sm';
-                  bubble.textContent = m.content?.slice(0, 500) + (m.content?.length > 500 ? '...' : '');
-                  li.appendChild(bubble);
-                  ul.appendChild(li);
-                  lastMessageAt = m.created_at;
-                }
-              }
-            } catch (_) {}
-            ul.scrollTop = ul.scrollHeight;
-          }
-        };
-
-        // Stream build events, reconnect if stream closes before terminal status
-        while (!abortCtrl.signal.aborted) {
-          try {
-            const streamRes = await fetch(
-              \`/api/projects/\${capturedProjectId}/stream?since=\${encodeURIComponent(lastEvAt)}\`,
-              { headers: { Authorization: 'Bearer ' + getToken() }, signal: abortCtrl.signal }
-            );
-            if (!streamRes.ok || !streamRes.body) break;
-
-            const reader = streamRes.body.getReader();
-            const dec = new TextDecoder();
-            let buf = '';
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              buf += dec.decode(value, { stream: true });
-              const lines = buf.split('\\n');
-              buf = lines.pop();
-              for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                try { await handleMsg(JSON.parse(line.slice(6))); } catch (_) {}
-              }
-            }
-          } catch (e) {
-            if (abortCtrl.signal.aborted) break;
-            await new Promise(r => setTimeout(r, 1500)); // pause before reconnect
-          }
-        }
+        if (proj) proj.status = 'thinking';
+        await streamBuildEvents(capturedProjectId);
       } catch (err) {
+        document.getElementById('thinkingIndicator')?.remove();
         const errLi = document.createElement('li');
         errLi.className = 'text-left text-red-400';
         errLi.textContent = 'Error: ' + err.message;
         ul.appendChild(errLi);
-      } finally {
-        removeThinking();
         sendBtn.disabled = false;
         ul.scrollTop = ul.scrollHeight;
       }
