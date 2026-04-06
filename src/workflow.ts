@@ -6,12 +6,13 @@ interface BuildWorkflowParams {
   projectId: string;
   projectName: string;
   baseUrl: string;
-  previousStatus: string;
+  previousStatus?: string;
+  buildId: string;
 }
 
 export class BuildWorkflow extends WorkflowEntrypoint<Env, BuildWorkflowParams> {
   async run(event: WorkflowEvent<BuildWorkflowParams>, step: WorkflowStep) {
-    const { projectId, projectName, baseUrl, previousStatus } = event.payload;
+    const { projectId, projectName, baseUrl, previousStatus, buildId } = event.payload;
 
     try {
       const result = await step.do(
@@ -24,6 +25,12 @@ export class BuildWorkflow extends WorkflowEntrypoint<Env, BuildWorkflowParams> 
           },
         },
         async () => {
+          // Guard: abort before running the agent if build was cancelled
+          const current = await this.env.DB.prepare(
+            "SELECT build_id FROM projects WHERE id = ?"
+          ).bind(projectId).first<{ build_id: string | null }>();
+          if (!current || current.build_id !== buildId) return { deployed: false, assistantMessages: [] };
+
           return await buildProject(
             this.env,
             projectId,
@@ -31,9 +38,9 @@ export class BuildWorkflow extends WorkflowEntrypoint<Env, BuildWorkflowParams> 
             baseUrl,
             async (message: string) => {
               await this.env.DB.prepare(
-                "INSERT INTO build_events (project_id, message) VALUES (?, ?)"
+                "INSERT INTO build_events (project_id, build_id, message) VALUES (?, ?, ?)"
               )
-                .bind(projectId, message)
+                .bind(projectId, buildId, message)
                 .run();
             }
           );
@@ -55,11 +62,11 @@ export class BuildWorkflow extends WorkflowEntrypoint<Env, BuildWorkflowParams> 
 
       // Update project status based on whether a deploy happened
       await step.do("update-project-status", async () => {
-        // Guard: if user cancelled, don't overwrite
+        // Guard: if build was cancelled or replaced, don't overwrite
         const current = await this.env.DB.prepare(
-          "SELECT status FROM projects WHERE id = ?"
-        ).bind(projectId).first<{ status: string }>();
-        if (!current || current.status === "idle") return;
+          "SELECT build_id FROM projects WHERE id = ?"
+        ).bind(projectId).first<{ build_id: string | null }>();
+        if (!current || current.build_id !== buildId) return;
 
         if (result.deployed) {
           await this.env.DB.prepare(
@@ -81,11 +88,11 @@ export class BuildWorkflow extends WorkflowEntrypoint<Env, BuildWorkflowParams> 
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Build failed";
-      // Guard: don't overwrite a cancelled build
+      // Guard: don't overwrite a cancelled or replaced build
       const current = await this.env.DB.prepare(
-        "SELECT status FROM projects WHERE id = ?"
-      ).bind(projectId).first<{ status: string }>();
-      if (current && current.status !== "idle") {
+        "SELECT build_id FROM projects WHERE id = ?"
+      ).bind(projectId).first<{ build_id: string | null }>();
+      if (current && current.build_id === buildId) {
         await this.env.DB.prepare("UPDATE projects SET status = ? WHERE id = ?")
           .bind("error", projectId)
           .run();

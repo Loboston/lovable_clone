@@ -102,12 +102,13 @@ app.post("/:id/build", async (c) => {
   if (!project) return c.json({ error: "Project not found" }, 404);
   if (project.status === "building") return c.json({ error: "Build already in progress" }, 409);
 
-  await c.env.DB.prepare("UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ?")
-    .bind("building", id)
+  const buildId = randomId();
+  await c.env.DB.prepare("UPDATE projects SET status = ?, updated_at = datetime('now'), build_id = ? WHERE id = ?")
+    .bind("building", buildId, id)
     .run();
 
   const baseUrl = new URL(c.req.url).origin;
-  await c.env.BUILD_WORKFLOW.create({ params: { projectId: id, projectName: project.name, baseUrl } });
+  await c.env.BUILD_WORKFLOW.create({ params: { projectId: id, projectName: project.name, baseUrl, buildId } });
 
   return c.json({ success: true, status: "building" });
 });
@@ -146,12 +147,14 @@ app.get("/:id/stream", async (c) => {
   const since = c.req.query("since") ?? "";
 
   const project = await c.env.DB.prepare(
-    "SELECT id, status FROM projects WHERE id = ? AND user_id = ?"
+    "SELECT id, status, build_id FROM projects WHERE id = ? AND user_id = ?"
   )
     .bind(id, user.sub)
-    .first<{ id: string; status: string }>();
+    .first<{ id: string; status: string; build_id: string | null }>();
 
   if (!project) return c.json({ error: "Project not found" }, 404);
+
+  const streamBuildId = project.build_id;
 
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
@@ -166,17 +169,19 @@ app.get("/:id/stream", async (c) => {
       while (Date.now() < deadline) {
         await new Promise<void>((r) => setTimeout(r, 1000));
 
-        const { results } = lastAt
-          ? await c.env.DB.prepare(
-              "SELECT message, created_at FROM build_events WHERE project_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 50"
-            )
-              .bind(id, lastAt)
-              .all()
-          : await c.env.DB.prepare(
-              "SELECT message, created_at FROM build_events WHERE project_id = ? ORDER BY created_at ASC LIMIT 50"
-            )
-              .bind(id)
-              .all();
+        const { results } = streamBuildId
+          ? lastAt
+            ? await c.env.DB.prepare(
+                "SELECT message, created_at FROM build_events WHERE project_id = ? AND build_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 50"
+              )
+                .bind(id, streamBuildId, lastAt)
+                .all()
+            : await c.env.DB.prepare(
+                "SELECT message, created_at FROM build_events WHERE project_id = ? AND build_id = ? ORDER BY created_at ASC LIMIT 50"
+              )
+                .bind(id, streamBuildId)
+                .all()
+          : { results: [] };
 
         for (const ev of results as { message: string; created_at: string }[]) {
           await send({ type: "event", message: ev.message, created_at: ev.created_at });
@@ -270,7 +275,7 @@ app.post("/:id/cancel", async (c) => {
   if (!project) return c.json({ error: "Project not found" }, 404);
 
   await c.env.DB.prepare(
-    "UPDATE projects SET status = 'idle', updated_at = datetime('now') WHERE id = ?"
+    "UPDATE projects SET status = 'idle', updated_at = datetime('now'), build_id = NULL WHERE id = ?"
   )
     .bind(id)
     .run();

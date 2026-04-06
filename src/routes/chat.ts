@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { authMiddleware } from "../middleware";
+import { randomId } from "../auth";
 import type { Env } from "../types";
 
 const app = new Hono<{ Bindings: Env; Variables: { user: { sub: string; email: string } } }>();
@@ -49,16 +50,17 @@ app.post("/", async (c) => {
 
   // Set project to "thinking" so the UI knows the agent is running
   const previousStatus = project.status;
+  const buildId = randomId();
   await c.env.DB.prepare(
-    "UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ?"
+    "UPDATE projects SET status = ?, updated_at = datetime('now'), build_id = ? WHERE id = ?"
   )
-    .bind("thinking", projectId)
+    .bind("thinking", buildId, projectId)
     .run();
 
   // Trigger the workflow — it runs the agent, saves its response, and updates status
   const baseUrl = new URL(c.req.url).origin;
   await c.env.BUILD_WORKFLOW.create({
-    params: { projectId, projectName: project.name, baseUrl, previousStatus },
+    params: { projectId, projectName: project.name, baseUrl, previousStatus, buildId },
   });
 
   return c.json({ success: true });

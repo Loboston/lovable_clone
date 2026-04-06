@@ -448,7 +448,7 @@ function render() {
       const r = await api('/api/projects');
       const data = await r.json();
       if (r.ok) projects = data.projects || [];
-      renderSidebar();
+      if (!currentProjectId) renderSidebar();
     })();
   }
 

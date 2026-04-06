@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS projects (
   deployed_url TEXT,
   d1_database_id TEXT,
   worker_name TEXT,
+  build_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS build_logs (
 CREATE TABLE IF NOT EXISTS build_events (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   project_id TEXT NOT NULL REFERENCES projects(id),
+  build_id TEXT,
   message TEXT NOT NULL,
   created_at TEXT DEFAULT (datetime('now'))
 );
