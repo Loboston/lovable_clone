@@ -489,6 +489,12 @@ function renderSidebar() {
           <span>Projects</span>
           <svg id="projectsChevron" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform \${projectsCollapsed ? '-rotate-90' : ''}"><polyline points="6 9 12 15 18 9"></polyline></svg>
         </button>
+        <div id="projectSearchWrap" class="px-3 pb-2 shrink-0 \${projectsCollapsed ? 'hidden' : ''}">
+          <div class="relative">
+            <input id="projectSearch" type="text" placeholder="Search projects..." class="w-full pl-3 pr-7 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-sm focus:outline-none focus:border-slate-500 placeholder-slate-500" />
+            <button id="projectSearchClear" class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs">✕</button>
+          </div>
+        </div>
         <ul id="projectList" class="flex-1 overflow-auto space-y-1 px-3 pr-0 text-sm \${projectsCollapsed ? 'hidden' : ''}"></ul>
       </div>
     \`;
@@ -497,8 +503,25 @@ function renderSidebar() {
       projectsCollapsed = !projectsCollapsed;
       const list = document.getElementById('projectList');
       const chevron = document.getElementById('projectsChevron');
+      const searchWrap = document.getElementById('projectSearchWrap');
       if (list) list.classList.toggle('hidden', projectsCollapsed);
       if (chevron) chevron.classList.toggle('-rotate-90', projectsCollapsed);
+      if (searchWrap) searchWrap.classList.toggle('hidden', projectsCollapsed);
+    };
+
+    document.getElementById('projectSearch').oninput = (e) => {
+      const q = e.target.value.toLowerCase();
+      document.getElementById('projectSearchClear').classList.toggle('hidden', !q);
+      document.querySelectorAll('#projectList li').forEach(li => {
+        const name = li.querySelector('.projectBtn')?.textContent?.toLowerCase() || '';
+        li.style.display = name.includes(q) ? '' : 'none';
+      });
+    };
+
+    document.getElementById('projectSearchClear').onclick = () => {
+      document.getElementById('projectSearch').value = '';
+      document.getElementById('projectSearchClear').classList.add('hidden');
+      document.querySelectorAll('#projectList li').forEach(li => li.style.display = '');
     };
 
     renderProjectList();
