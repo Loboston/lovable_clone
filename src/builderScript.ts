@@ -65,6 +65,19 @@ async function streamBuildEvents(projectId) {
       cancel.onclick = async () => {
         try { await api(\`/api/projects/\${projectId}/cancel\`, { method: 'POST' }); } catch (_) {}
         abortCtrl.abort();
+        // Mark active step as cancelled
+        if (lastProgressItem) {
+          lastProgressItem.innerHTML = \`<span class="text-red-500 mr-1.5 shrink-0">✗</span><span class="text-slate-500">\${lastProgressItem.dataset.msg}</span>\`;
+        }
+        // Show "Build stopped" banner
+        const ul = document.getElementById('chatMessages');
+        if (ul) {
+          const banner = document.createElement('li');
+          banner.className = 'flex justify-center w-full py-1';
+          banner.innerHTML = \`<div class="px-4 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs text-slate-400">Build stopped</div>\`;
+          ul.appendChild(banner);
+          ul.scrollTop = ul.scrollHeight;
+        }
         showSend();
         const p = projects.find(x => x.id === projectId);
         if (p) p.status = 'idle';
@@ -96,8 +109,8 @@ async function streamBuildEvents(projectId) {
         progressBox.querySelector('.progress-toggle').onclick = () => {
           const steps = progressBox.querySelector('.progress-steps');
           const chevron = progressBox.querySelector('.progress-chevron');
-          steps.classList.toggle('hidden');
-          chevron.classList.toggle('rotate-180');
+          const isNowCollapsed = steps.classList.toggle('collapsed');
+          chevron.classList.toggle('-rotate-90', isNowCollapsed);
         };
       }
       if (lastProgressItem) {
@@ -356,6 +369,7 @@ function render() {
           background-clip: text;
           animation: shimmer-scan 1.8s linear infinite;
         }
+        .progress-steps.collapsed > li:not(:first-child) { display: none; }
       \`;
       document.head.appendChild(style);
     }

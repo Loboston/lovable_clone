@@ -64,9 +64,12 @@ const AGENT_TOOLS = [
 
 Call this before major actions and after milestones so the user knows what is happening.
 Messages must be concrete and specific to the current task — not generic filler.
+Write messages as a non-technical user would understand them — no file names (worker.js, index.html, migration.sql),
+no infrastructure terms (R2, D1, Cloudflare, Workers), no deployment jargon.
+Describe what the app is doing, not the technical mechanism.
 
-Good: "Planning the auth routes", "Generating the standings endpoint", "Fixing the API response parser"
-Bad: "Thinking...", "Processing...", "Working on it..."
+Good: "Planning the auth system", "Building the dashboard view", "Setting up the database", "Deploying your app"
+Bad: "Writing worker.js", "Uploading to R2", "Running D1 migration", "Deploying to Cloudflare Workers for Platforms"
 
 Types:
 - "progress" — general status (planning, analyzing, reading, fixing)
