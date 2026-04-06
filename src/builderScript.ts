@@ -28,6 +28,8 @@ let lastMessageAt = '';
 const lastEventAtMap = new Map();
 let projectsCollapsed = false;
 let userName = localStorage.getItem('userName') || '';
+let showPreviewByDefault = localStorage.getItem('showPreview') !== 'false';
+let darkMode = localStorage.getItem('darkMode') !== 'false';
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
 // Created once after login. renderSidebar/renderMain swap content independently.
@@ -157,14 +159,73 @@ function render() {
 
   if (!document.getElementById('appShell')) {
     root.innerHTML = \`
-      <div id="appShell" class="flex h-screen overflow-hidden relative">
-        <aside id="sidebar" class="w-[32rem] border-r border-slate-700 flex flex-col shrink-0 overflow-hidden"></aside>
+      <div id="appShell" class="flex h-screen overflow-hidden relative \${darkMode ? '' : 'light-mode'}">
+        <!-- Mini sidebar -->
+        <div id="miniSidebar" class="w-12 border-r border-slate-700 bg-slate-900 flex flex-col items-center py-3 shrink-0 z-10">
+          <div class="mt-auto flex flex-col items-center gap-1 pb-2">
+            <button id="gearBtn" title="Menu" class="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            </button>
+            <div id="gearMenu" class="hidden absolute bottom-12 left-2 w-44 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 overflow-hidden text-sm">
+              <button id="profileMenuBtn" class="w-full text-left px-4 py-2.5 hover:bg-slate-700 text-slate-200">Profile</button>
+              <button id="settingsMenuBtn" class="w-full text-left px-4 py-2.5 hover:bg-slate-700 text-slate-200">Settings</button>
+              <div class="border-t border-slate-700"></div>
+              <button id="logoutBtn" class="w-full text-left px-4 py-2.5 hover:bg-slate-700 text-red-400">Log out</button>
+            </div>
+          </div>
+        </div>
+        <!-- Resizable project sidebar -->
+        <aside id="sidebar" class="border-r border-slate-700 flex flex-col shrink-0 overflow-hidden" style="width:320px;min-width:180px;max-width:600px;"></aside>
+        <div id="sidebarResizer" class="w-1 cursor-col-resize bg-transparent hover:bg-slate-600 transition-colors shrink-0 z-10"></div>
         <div id="mainContent" class="flex-1 overflow-hidden flex flex-col"></div>
-        <!-- Profile drawer — always in DOM, slides via translate -->
-        <div id="profileDrawer" class="absolute inset-y-0 right-0 w-96 bg-slate-900 border-l border-slate-700 flex flex-col shadow-2xl z-30 translate-x-full transition-transform duration-300 ease-in-out"></div>
-        <div id="profileBackdrop" class="hidden absolute inset-0 bg-black/30 z-20"></div>
+        <!-- Modal backdrop -->
+        <div id="modalBackdrop" class="hidden fixed inset-0 bg-black/50 z-40 flex items-center justify-center"></div>
       </div>
     \`;
+
+    // Gear menu
+    document.getElementById('gearBtn').onclick = (e) => {
+      e.stopPropagation();
+      document.getElementById('gearMenu').classList.toggle('hidden');
+    };
+    document.addEventListener('click', () => document.getElementById('gearMenu')?.classList.add('hidden'), { once: true });
+    document.getElementById('profileMenuBtn').onclick = () => {
+      document.getElementById('gearMenu').classList.add('hidden');
+      openProfileModal();
+    };
+    document.getElementById('settingsMenuBtn').onclick = () => {
+      document.getElementById('gearMenu').classList.add('hidden');
+      openSettingsModal();
+    };
+    document.getElementById('logoutBtn').onclick = () => {
+      setToken(null); currentProjectId = null; projects = [];
+      document.getElementById('root').innerHTML = '';
+      render();
+    };
+
+    // Resizable sidebar
+    const resizer = document.getElementById('sidebarResizer');
+    const sidebar = document.getElementById('sidebar');
+    let isResizing = false;
+    resizer.addEventListener('mousedown', (e) => {
+      isResizing = true;
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing) return;
+      const miniW = document.getElementById('miniSidebar').offsetWidth;
+      const newW = Math.min(600, Math.max(180, e.clientX - miniW));
+      sidebar.style.width = newW + 'px';
+      localStorage.setItem('sidebarWidth', newW);
+    });
+    document.addEventListener('mouseup', () => {
+      isResizing = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    });
+    const savedW = localStorage.getItem('sidebarWidth');
+    if (savedW) sidebar.style.width = savedW + 'px';
 
     // Load projects then render
     (async () => {
@@ -421,18 +482,8 @@ function renderSidebar() {
     // Home sidebar — project list
     sidebar.innerHTML = \`
       <div class="flex flex-col h-full">
-        <div class="px-4 py-3 border-b border-slate-700 flex justify-between items-center shrink-0">
+        <div class="px-4 py-3 border-b border-slate-700 shrink-0">
           <h1 class="text-lg font-bold">App Builder</h1>
-          <div class="relative">
-            <button id="gearBtn" title="Settings" class="text-slate-400 hover:text-white p-1.5 rounded hover:bg-slate-700 transition-colors">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-            </button>
-            <div id="gearMenu" class="hidden absolute right-0 mt-1 w-40 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 overflow-hidden text-sm">
-              <button id="profileMenuBtn" class="w-full text-left px-4 py-2.5 hover:bg-slate-700 text-slate-200">Profile</button>
-              <div class="border-t border-slate-700"></div>
-              <button id="logoutBtn" class="w-full text-left px-4 py-2.5 hover:bg-slate-700 text-red-400">Log out</button>
-            </div>
-          </div>
         </div>
         <button id="projectsToggleBtn" class="shrink-0 flex items-center justify-between w-full px-4 py-2.5 text-xs font-semibold uppercase tracking-widest text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors">
           <span>Projects</span>
@@ -441,23 +492,6 @@ function renderSidebar() {
         <ul id="projectList" class="flex-1 overflow-auto space-y-1 px-3 pr-0 text-sm \${projectsCollapsed ? 'hidden' : ''}"></ul>
       </div>
     \`;
-
-    document.getElementById('gearBtn').onclick = (e) => {
-      e.stopPropagation();
-      document.getElementById('gearMenu').classList.toggle('hidden');
-    };
-    document.addEventListener('click', () => document.getElementById('gearMenu')?.classList.add('hidden'), { once: true });
-
-    document.getElementById('profileMenuBtn').onclick = () => {
-      document.getElementById('gearMenu').classList.add('hidden');
-      openProfileDrawer();
-    };
-
-    document.getElementById('logoutBtn').onclick = () => {
-      setToken(null); currentProjectId = null; projects = [];
-      document.getElementById('root').innerHTML = '';
-      render();
-    };
 
     document.getElementById('projectsToggleBtn').onclick = () => {
       projectsCollapsed = !projectsCollapsed;
@@ -471,7 +505,7 @@ function renderSidebar() {
   }
 }
 
-// ── Profile drawer ────────────────────────────────────────────────────────────
+// ── Modals (Profile + Settings) ───────────────────────────────────────────────
 
 function getEmailFromToken() {
   try {
@@ -482,103 +516,206 @@ function getEmailFromToken() {
   } catch { return ''; }
 }
 
-function openProfileDrawer() {
-  const drawer = document.getElementById('profileDrawer');
-  const backdrop = document.getElementById('profileBackdrop');
-  if (!drawer || !backdrop) return;
+function openModal(contentHtml, onReady) {
+  const backdrop = document.getElementById('modalBackdrop');
+  backdrop.innerHTML = \`
+    <div id="modalCard" class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[85vh] flex flex-col animate-modal-in">
+      \${contentHtml}
+    </div>
+  \`;
+  backdrop.classList.remove('hidden');
+  backdrop.onclick = (e) => { if (e.target === backdrop) closeModal(); };
+  if (onReady) onReady();
+}
 
+function closeModal() {
+  const backdrop = document.getElementById('modalBackdrop');
+  if (backdrop) backdrop.classList.add('hidden');
+}
+
+async function openProfileModal() {
   const email = getEmailFromToken();
+  // Fetch account info (created_at)
+  let createdAt = '';
+  try {
+    const r = await api('/api/auth/me');
+    const d = await r.json();
+    if (d.user?.created_at) createdAt = new Date(d.user.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  } catch {}
 
-  drawer.innerHTML = \`
-    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700 shrink-0">
+  openModal(\`
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700 shrink-0">
       <h2 class="font-semibold text-base">Profile</h2>
-      <button id="closeProfileBtn" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-700 transition-colors">
+      <button id="closeModalBtn" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-700 transition-colors">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
       </button>
     </div>
-    <div class="flex-1 overflow-auto p-5 space-y-6">
+    <div class="flex-1 overflow-auto p-6 space-y-6">
       <div class="space-y-3">
         <h3 class="text-xs font-semibold uppercase tracking-widest text-slate-400">Account</h3>
         <div>
           <label class="block text-xs text-slate-400 mb-1">Email</label>
-          <div class="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-sm text-slate-300">\${email}</div>
+          <div class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-300">\${email}</div>
         </div>
+        \${createdAt ? \`<div><label class="block text-xs text-slate-400 mb-1">Member since</label><div class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-300">\${createdAt}</div></div>\` : ''}
         <div>
           <label class="block text-xs text-slate-400 mb-1">Display name</label>
-          <input id="drawerNameInput" type="text" value="\${userName}" placeholder="e.g. Ariel" maxlength="40"
-            class="w-full px-3 py-2 rounded bg-slate-800 border border-slate-700 text-sm focus:outline-none focus:border-slate-500" />
+          <input id="profileNameInput" type="text" value="\${userName}" placeholder="e.g. Ariel" maxlength="40"
+            class="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm focus:outline-none focus:border-slate-500" />
           <p id="nameSavedMsg" class="text-xs text-emerald-400 mt-1 hidden">Saved</p>
         </div>
       </div>
       <div class="space-y-3">
         <h3 class="text-xs font-semibold uppercase tracking-widest text-slate-400">Change password</h3>
-        <div>
-          <label class="block text-xs text-slate-400 mb-1">Current password</label>
-          <input id="currentPw" type="password" placeholder="••••••••"
-            class="w-full px-3 py-2 rounded bg-slate-800 border border-slate-700 text-sm focus:outline-none focus:border-slate-500" />
-        </div>
-        <div>
-          <label class="block text-xs text-slate-400 mb-1">New password</label>
-          <input id="newPw" type="password" placeholder="••••••••"
-            class="w-full px-3 py-2 rounded bg-slate-800 border border-slate-700 text-sm focus:outline-none focus:border-slate-500" />
-        </div>
-        <button id="changePwBtn" class="w-full px-4 py-2 rounded bg-slate-700 hover:bg-slate-600 text-sm font-medium transition-colors">Update password</button>
+        <input id="currentPw" type="password" placeholder="Current password"
+          class="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm focus:outline-none focus:border-slate-500" />
+        <input id="newPw" type="password" placeholder="New password (min. 8 characters)"
+          class="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm focus:outline-none focus:border-slate-500" />
+        <button id="changePwBtn" class="w-full px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium transition-colors">Update password</button>
         <p id="pwMsg" class="text-xs hidden"></p>
       </div>
+      <div class="space-y-3 pt-2 border-t border-slate-700">
+        <h3 class="text-xs font-semibold uppercase tracking-widest text-red-400">Danger zone</h3>
+        <button id="deleteAccountBtn" class="w-full px-4 py-2 rounded-lg bg-red-900/40 hover:bg-red-900/70 border border-red-800 text-sm font-medium text-red-400 transition-colors">Delete account</button>
+        <p id="deleteAccountMsg" class="text-xs hidden"></p>
+      </div>
     </div>
-  \`;
+  \`, () => {
+    document.getElementById('closeModalBtn').onclick = closeModal;
 
-  // Slide in — double rAF ensures browser paints the off-screen position first
-  backdrop.classList.remove('hidden');
-  requestAnimationFrame(() => requestAnimationFrame(() => drawer.classList.remove('translate-x-full')));
+    document.getElementById('profileNameInput').onblur = (e) => {
+      userName = e.target.value.trim();
+      localStorage.setItem('userName', userName);
+      const heading = document.getElementById('welcomeHeading');
+      if (heading) heading.textContent = userName ? \`What do you want to build, \${userName}?\` : 'What do you want to build?';
+      const msg = document.getElementById('nameSavedMsg');
+      if (msg) { msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 2000); }
+    };
 
-  const close = () => {
-    drawer.classList.add('translate-x-full');
-    backdrop.classList.add('hidden');
-  };
+    document.getElementById('changePwBtn').onclick = async () => {
+      const btn = document.getElementById('changePwBtn');
+      const msg = document.getElementById('pwMsg');
+      btn.disabled = true; btn.textContent = 'Updating...'; msg.className = 'text-xs hidden';
+      try {
+        const r = await api('/api/auth/change-password', { method: 'POST', body: { currentPassword: document.getElementById('currentPw').value, newPassword: document.getElementById('newPw').value } });
+        const data = await r.json();
+        if (r.ok) { msg.textContent = 'Password updated.'; msg.className = 'text-xs text-emerald-400'; document.getElementById('currentPw').value = ''; document.getElementById('newPw').value = ''; }
+        else { msg.textContent = data.error || 'Failed.'; msg.className = 'text-xs text-red-400'; }
+      } catch { msg.textContent = 'Something went wrong.'; msg.className = 'text-xs text-red-400'; }
+      finally { btn.disabled = false; btn.textContent = 'Update password'; }
+    };
 
-  document.getElementById('closeProfileBtn').onclick = close;
-  backdrop.onclick = close;
-
-  // Name save on blur
-  document.getElementById('drawerNameInput').onblur = (e) => {
-    userName = e.target.value.trim();
-    localStorage.setItem('userName', userName);
-    const heading = document.getElementById('welcomeHeading');
-    if (heading) heading.textContent = userName ? \`What do you want to build, \${userName}?\` : 'What do you want to build?';
-    const msg = document.getElementById('nameSavedMsg');
-    if (msg) { msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 2000); }
-  };
-
-  // Change password
-  document.getElementById('changePwBtn').onclick = async () => {
-    const btn = document.getElementById('changePwBtn');
-    const msg = document.getElementById('pwMsg');
-    const currentPw = document.getElementById('currentPw').value;
-    const newPw = document.getElementById('newPw').value;
-    btn.disabled = true;
-    btn.textContent = 'Updating...';
-    msg.className = 'text-xs hidden';
-    try {
-      const r = await api('/api/auth/change-password', { method: 'POST', body: { currentPassword: currentPw, newPassword: newPw } });
-      const data = await r.json();
-      if (r.ok) {
-        msg.textContent = 'Password updated successfully.';
-        msg.className = 'text-xs text-emerald-400';
-        document.getElementById('currentPw').value = '';
-        document.getElementById('newPw').value = '';
-      } else {
-        msg.textContent = data.error || 'Failed to update password.';
-        msg.className = 'text-xs text-red-400';
+    document.getElementById('deleteAccountBtn').onclick = async () => {
+      const msg = document.getElementById('deleteAccountMsg');
+      const btn = document.getElementById('deleteAccountBtn');
+      if (btn.dataset.confirm !== 'yes') {
+        btn.textContent = 'Tap again to confirm deletion';
+        btn.dataset.confirm = 'yes';
+        return;
       }
-    } catch {
-      msg.textContent = 'Something went wrong.';
-      msg.className = 'text-xs text-red-400';
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Update password';
-    }
-  };
+      btn.disabled = true; btn.textContent = 'Deleting...';
+      try {
+        const r = await api('/api/auth/account', { method: 'DELETE' });
+        if (r.ok) { setToken(null); document.getElementById('root').innerHTML = ''; render(); }
+        else { const d = await r.json(); msg.textContent = d.error || 'Failed.'; msg.className = 'text-xs text-red-400'; btn.disabled = false; btn.textContent = 'Delete account'; }
+      } catch { msg.textContent = 'Something went wrong.'; msg.className = 'text-xs text-red-400'; btn.disabled = false; btn.textContent = 'Delete account'; }
+    };
+  });
+}
+
+function openSettingsModal() {
+  openModal(\`
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700 shrink-0">
+      <h2 class="font-semibold text-base">Settings</h2>
+      <button id="closeModalBtn" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-700 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
+    <div class="flex-1 overflow-auto p-6 space-y-6">
+      <div class="space-y-4">
+        <h3 class="text-xs font-semibold uppercase tracking-widest text-slate-400">Appearance</h3>
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Dark mode</div>
+            <div class="text-xs text-slate-400 mt-0.5">Light mode coming soon</div>
+          </div>
+          <button id="darkModeToggle" class="relative w-11 h-6 rounded-full transition-colors \${darkMode ? 'bg-emerald-600' : 'bg-slate-600'}">
+            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform \${darkMode ? 'translate-x-5' : ''}"></span>
+          </button>
+        </div>
+      </div>
+      <div class="space-y-4 border-t border-slate-700 pt-4">
+        <h3 class="text-xs font-semibold uppercase tracking-widest text-slate-400">Builder</h3>
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Show preview by default</div>
+            <div class="text-xs text-slate-400 mt-0.5">Auto-load preview iframe when opening a project</div>
+          </div>
+          <button id="previewToggle" class="relative w-11 h-6 rounded-full transition-colors \${showPreviewByDefault ? 'bg-emerald-600' : 'bg-slate-600'}">
+            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform \${showPreviewByDefault ? 'translate-x-5' : ''}"></span>
+          </button>
+        </div>
+      </div>
+      <div class="space-y-4 border-t border-slate-700 pt-4">
+        <h3 class="text-xs font-semibold uppercase tracking-widest text-slate-400">Export</h3>
+        <div class="text-xs text-slate-400">Download the generated files for the selected project.</div>
+        <div id="exportProjectSelect" class="space-y-2">
+          \${projects.length === 0 ? '<p class="text-xs text-slate-500">No projects yet.</p>' : projects.map(p => \`
+            <div class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">
+              <span class="text-sm truncate mr-3">\${p.name}</span>
+              <button class="exportBtn shrink-0 px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-xs font-medium transition-colors" data-id="\${p.id}" data-name="\${p.name}">Export</button>
+            </div>
+          \`).join('')}
+        </div>
+        <p id="exportMsg" class="text-xs hidden"></p>
+      </div>
+    </div>
+  \`, () => {
+    document.getElementById('closeModalBtn').onclick = closeModal;
+
+    document.getElementById('darkModeToggle').onclick = () => {
+      darkMode = !darkMode;
+      localStorage.setItem('darkMode', darkMode);
+      const shell = document.getElementById('appShell');
+      if (shell) shell.classList.toggle('light-mode', !darkMode);
+      const btn = document.getElementById('darkModeToggle');
+      btn.className = \`relative w-11 h-6 rounded-full transition-colors \${darkMode ? 'bg-emerald-600' : 'bg-slate-600'}\`;
+      btn.querySelector('span').className = \`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform \${darkMode ? 'translate-x-5' : ''}\`;
+    };
+
+    document.getElementById('previewToggle').onclick = () => {
+      showPreviewByDefault = !showPreviewByDefault;
+      localStorage.setItem('showPreview', showPreviewByDefault);
+      const btn = document.getElementById('previewToggle');
+      btn.className = \`relative w-11 h-6 rounded-full transition-colors \${showPreviewByDefault ? 'bg-emerald-600' : 'bg-slate-600'}\`;
+      btn.querySelector('span').className = \`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform \${showPreviewByDefault ? 'translate-x-5' : ''}\`;
+    };
+
+    document.querySelectorAll('.exportBtn').forEach(btn => {
+      btn.onclick = async () => {
+        const projectId = btn.dataset.id;
+        const projectName = btn.dataset.name;
+        const msg = document.getElementById('exportMsg');
+        btn.disabled = true; btn.textContent = 'Fetching...';
+        try {
+          const files = ['worker.js', 'index.html', 'migration.sql'];
+          for (const file of files) {
+            const r = await fetch(\`/api/projects/\${projectId}/file/\${file}\`, { headers: { Authorization: 'Bearer ' + getToken() } });
+            if (!r.ok) continue;
+            const text = await r.text();
+            const blob = new Blob([text], { type: 'text/plain' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = \`\${projectName.replace(/[\\s]+/g, '-')}-\${file}\`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+          }
+          msg.textContent = 'Files downloaded.'; msg.className = 'text-xs text-emerald-400';
+        } catch { msg.textContent = 'Export failed.'; msg.className = 'text-xs text-red-400'; }
+        finally { btn.disabled = false; btn.textContent = 'Export'; }
+      };
+    });
+  });
 }
 
 // ── Project list (home sidebar) ───────────────────────────────────────────────

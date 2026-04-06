@@ -76,6 +76,44 @@ app.post("/login", async (c) => {
   return c.json({ token, user: { id: user.id, email: user.email } });
 });
 
+app.get("/me", authMiddleware(), async (c) => {
+  const user = c.get("user");
+  const row = await c.env.DB.prepare(
+    "SELECT id, email, created_at FROM users WHERE id = ?"
+  )
+    .bind(user.sub)
+    .first<{ id: string; email: string; created_at: string }>();
+  if (!row) return c.json({ error: "User not found" }, 404);
+  return c.json({ user: row });
+});
+
+app.delete("/account", authMiddleware(), async (c) => {
+  const user = c.get("user");
+
+  // Get all projects to tear down CF resources
+  const { results: userProjects } = await c.env.DB.prepare(
+    "SELECT id, worker_name, d1_database_id FROM projects WHERE user_id = ?"
+  )
+    .bind(user.sub)
+    .all<{ id: string; worker_name: string | null; d1_database_id: string | null }>();
+
+  const { deleteProject } = await import("../teardown");
+  for (const project of userProjects) {
+    try {
+      await deleteProject(c.env, project.id, project.worker_name, project.d1_database_id);
+    } catch (err) {
+      console.error("Teardown failed for project", project.id, err);
+    }
+    await c.env.DB.prepare("DELETE FROM build_events WHERE project_id = ?").bind(project.id).run();
+    await c.env.DB.prepare("DELETE FROM build_logs WHERE project_id = ?").bind(project.id).run();
+    await c.env.DB.prepare("DELETE FROM chat_messages WHERE project_id = ?").bind(project.id).run();
+    await c.env.DB.prepare("DELETE FROM projects WHERE id = ?").bind(project.id).run();
+  }
+
+  await c.env.DB.prepare("DELETE FROM users WHERE id = ?").bind(user.sub).run();
+  return c.json({ success: true });
+});
+
 app.post("/change-password", authMiddleware(), async (c) => {
   const user = c.get("user");
   const body = (await c.req.json().catch(() => ({}))) as { currentPassword?: string; newPassword?: string };

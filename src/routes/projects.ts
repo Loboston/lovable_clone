@@ -231,6 +231,32 @@ app.get("/:id/files", async (c) => {
   return c.json({ files });
 });
 
+app.get("/:id/file/:filename", async (c) => {
+  const id = c.req.param("id");
+  const filename = c.req.param("filename");
+  const user = c.get("user");
+
+  if (!["worker.js", "index.html", "migration.sql"].includes(filename)) {
+    return c.json({ error: "Invalid filename" }, 400);
+  }
+
+  const project = await c.env.DB.prepare(
+    "SELECT id FROM projects WHERE id = ? AND user_id = ?"
+  )
+    .bind(id, user.sub)
+    .first();
+
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  const obj = await c.env.CODE_BUCKET.get(`projects/${id}/${filename}`);
+  if (!obj) return c.json({ error: "File not found" }, 404);
+
+  const text = await obj.text();
+  return new Response(text, {
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+});
+
 app.delete("/:id", async (c) => {
   const id = c.req.param("id");
   const user = c.get("user");
