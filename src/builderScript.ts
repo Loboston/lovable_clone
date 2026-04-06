@@ -414,6 +414,9 @@ function renderSidebar() {
     document.getElementById('backToDashboardBtn').onclick = () => {
       currentProjectId = null;
       lastMessageAt = '';
+      queuedMessage = null;
+      document.getElementById('queuedBubble')?.remove();
+      if (activeStreamAbort) { activeStreamAbort.abort(); activeStreamAbort = null; }
       renderSidebar();
       renderMain();
     };
@@ -437,6 +440,15 @@ function renderSidebar() {
         if (m.created_at) lastMessageAt = m.created_at;
       });
       ul.scrollTop = ul.scrollHeight;
+
+      // Auto-reconnect if the project is still building/thinking
+      const currentProj = projects.find(p => p.id === currentProjectId);
+      if (currentProj?.status === 'building' || currentProj?.status === 'thinking') {
+        const sb = document.getElementById('sendBtn');
+        if (sb) sb.disabled = true;
+        showThinkingIndicator();
+        streamBuildEvents(currentProjectId);
+      }
     })();
 
     // Send button logic
@@ -805,6 +817,8 @@ function renderProjectList() {
       if (currentProjectId === btn.dataset.id) return;
       currentProjectId = btn.dataset.id;
       lastMessageAt = '';
+      queuedMessage = null;
+      if (activeStreamAbort) { activeStreamAbort.abort(); activeStreamAbort = null; }
       renderSidebar();
       renderMain();
     };

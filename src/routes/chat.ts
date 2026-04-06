@@ -24,6 +24,9 @@ app.post("/", async (c) => {
     .first<{ id: string; name: string; status: string }>();
 
   if (!project) return c.json({ error: "Project not found" }, 404);
+  if (project.status === "building" || project.status === "thinking") {
+    return c.json({ error: "A build is already in progress for this project" }, 409);
+  }
 
   // Save the user message
   await c.env.DB.prepare(
