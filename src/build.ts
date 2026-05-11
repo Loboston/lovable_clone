@@ -161,5 +161,5 @@ export async function buildProject(
   const deployFn: DeployFn = (workerJs, indexHtml, migrationSql) =>
     deployFiles(env, projectId, workerJs, indexHtml, migrationSql, baseUrl);
 
-  return await runBuildAgent(env.ANTHROPIC_API_KEY, storage, deployFn, projectId, conversation, isFirstDeploy, onProgress);
+  return await runBuildAgent(env.ANTHROPIC_API_KEY, env.CF_AIG_TOKEN, storage, deployFn, projectId, conversation, isFirstDeploy, onProgress);
 }

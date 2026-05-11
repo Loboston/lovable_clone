@@ -16,7 +16,7 @@ export interface StorageAdapter {
   writeFile(filename: string, content: string): Promise<void>;
 }
 
-const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_API = "https://gateway.ai.cloudflare.com/v1/3cd12c15afa8ca3571132632118ffc15/default/anthropic/v1/messages";
 const AGENT_MODEL = "claude-sonnet-4-6";
 const MAX_ITERATIONS = 20;
 
@@ -278,6 +278,7 @@ ${INDEX_HTML_SCAFFOLD}
 
 async function callAnthropic(
   apiKey: string,
+  aigToken: string,
   messages: AgentMessage[]
 ): Promise<AnthropicResponse> {
   const res = await fetch(ANTHROPIC_API, {
@@ -286,6 +287,7 @@ async function callAnthropic(
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
+      "cf-aig-authorization": `Bearer ${aigToken}`,
     },
     body: JSON.stringify({
       model: AGENT_MODEL,
@@ -323,6 +325,7 @@ function buildInitialMessage(
 
 export async function runBuildAgent(
   apiKey: string,
+  aigToken: string,
   storage: StorageAdapter,
   deployFn: DeployFn,
   projectId: string,
@@ -405,7 +408,7 @@ export async function runBuildAgent(
   ];
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
-    const response = await callAnthropic(apiKey, messages);
+    const response = await callAnthropic(apiKey, aigToken, messages);
 
     // Append the assistant's full response (may include text + tool_use blocks)
     messages.push({ role: "assistant", content: response.content });

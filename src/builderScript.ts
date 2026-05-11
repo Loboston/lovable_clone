@@ -51,17 +51,18 @@ async function streamBuildEvents(projectId) {
 
   const showSend = () => {
     const send = document.getElementById('sendBtn');
-    const cancel = document.getElementById('cancelBtn');
+    const cancelWrap = document.getElementById('cancelBtnWrap');
     if (send) { send.classList.remove('hidden'); send.disabled = false; }
-    if (cancel) cancel.classList.add('hidden');
+    if (cancelWrap) cancelWrap.classList.add('hidden');
   };
 
   const showCancel = () => {
     const send = document.getElementById('sendBtn');
+    const cancelWrap = document.getElementById('cancelBtnWrap');
     const cancel = document.getElementById('cancelBtn');
     if (send) send.classList.add('hidden');
+    if (cancelWrap) cancelWrap.classList.remove('hidden');
     if (cancel) {
-      cancel.classList.remove('hidden');
       cancel.onclick = async () => {
         try { await api(\`/api/projects/\${projectId}/cancel\`, { method: 'POST' }); } catch (_) {}
         abortCtrl.abort();
@@ -370,6 +371,8 @@ function render() {
           animation: shimmer-scan 1.8s linear infinite;
         }
         .progress-steps.collapsed > li:not(:first-child) { display: none; }
+        @keyframes spin-cw { to { transform: rotate(360deg); } }
+        .stop-spinner { animation: spin-cw 1s linear infinite; transform-origin: 20px 20px; }
       \`;
       document.head.appendChild(style);
     }
@@ -477,7 +480,15 @@ function renderSidebar() {
         <div class="shrink-0 p-2 border-t border-slate-700">
           <textarea id="chatInput" rows="3" class="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 resize-none text-sm focus:outline-none focus:border-slate-400" placeholder="Ask for changes..."></textarea>
           <button id="sendBtn" class="mt-1 w-full px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-700 text-sm font-medium">Send</button>
-          <button id="cancelBtn" class="mt-1 w-full px-4 py-2 rounded bg-red-700 hover:bg-red-600 text-sm font-medium text-white hidden">■ Stop build</button>
+          <div id="cancelBtnWrap" class="hidden mt-1 flex justify-center">
+            <button id="cancelBtn" class="relative w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-700 transition-colors" title="Stop build">
+              <svg class="absolute inset-0 stop-spinner" width="40" height="40" viewBox="0 0 40 40">
+                <circle cx="20" cy="20" r="16" fill="none" stroke="#1e293b" stroke-width="2.5"/>
+                <circle cx="20" cy="20" r="16" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-dasharray="76 25" stroke-linecap="round"/>
+              </svg>
+              <span class="w-3.5 h-3.5 bg-red-400 rounded-sm block relative z-10 shrink-0"></span>
+            </button>
+          </div>
         </div>
       </div>
     \`;
